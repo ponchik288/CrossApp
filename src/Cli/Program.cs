@@ -1,5 +1,7 @@
 ﻿using System.Runtime.InteropServices;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Unicode;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
@@ -19,7 +21,12 @@ if (jsonMode)
         Domain = "Склад (товари, партії, залишки, переміщення)"
     };
 
-    Console.WriteLine(JsonSerializer.Serialize(info));
+    var options = new JsonSerializerOptions
+    {
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+    };
+
+    Console.WriteLine(JsonSerializer.Serialize(info, options));
 }
 else
 {
