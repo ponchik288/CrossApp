@@ -26,9 +26,15 @@ CrossApp/
       Dto/                   record-типи формату даних (ЛР3)
       Import/                імпортери CSV і JSON (ЛР3)
       Domain/                сутності з інваріантами (ЛР4)
+      Abstractions/          інтерфейс сховища ICatalogStore (ЛР5)
+      Storage/               сховища: у пам'яті, файлове, кешуюче (ЛР5)
+      Services/              CatalogService – бізнес-операції (ЛР5)
+      SampleData.cs          зразкові дані (18 товарів)
     Cli/                     консольний застосунок
       Cli.csproj             містить ProjectReference на Core
-      Program.cs             вибір команди за першим аргументом
+      Program.cs             composition root і вибір команди
+      CatalogCommand.cs      сценарій роботи з каталогом
+      StoreFactory.cs        вибір сховища через фабрику
       ImportCommand.cs       імпорт із файлу і вивід результату
       DomainDemo.cs          демонстрація доменної моделі
       EnvironmentPrinter.cs  вивід інформації про середовище
@@ -51,7 +57,9 @@ CrossApp/
 
 ```powershell
 dotnet build
-dotnet run --project src/Cli                             # імпорт data/sample.csv
+dotnet run --project src/Cli                             # каталог, сховище в пам'яті
+dotnet run --project src/Cli -- --file                   # каталог, файлове сховище
+dotnet run --project src/Cli -- data/sample.csv          # імпорт CSV
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
 dotnet run --project src/Cli -- data/mixed.csv --mixed   # товари і склади в одному файлі
 dotnet run --project src/Cli -- demo                     # доменна модель: успіх і порушення правил
@@ -268,3 +276,47 @@ W-01 Головний склад — товарів: 1
    записами одного товару. Правило винесене з сутностей, бо жодна з них не знає про іншу;
    з ЛР5 такі правила викликатиме сервіс.
 3. **Стан-перелічення**: `MovementStatus` і перевірка дозволених переходів через switch expression у `Movement`.
+
+## ЛР5. Сервісний шар: інтерфейс, два сховища, ручний DI
+
+Доменна логіка більше не залежить від того, де лежать дані. Сервіс працює з інтерфейсом,
+а конкретне сховище обирається в одному місці – у `Program.cs`.
+
+| Що | Назва | Де |
+|---|---|---|
+| Інтерфейс сховища | `ICatalogStore` (List, GetById, Add, Update, Remove) | `Core/Abstractions` |
+| Реалізація в пам'яті | `InMemoryCatalogStore` | `Core/Storage` |
+| Файлова реалізація | `FileCatalogStore` (JSON) | `Core/Storage` |
+| Сервіс | `CatalogService` (Add, Receive, Issue, Remove, All, Find, FindAll) | `Core/Services` |
+
+Схема залежностей:
+
+```text
+Cli (Program.cs) → CatalogService → ICatalogStore ← InMemoryCatalogStore | FileCatalogStore
+```
+
+`CatalogService` отримує `ICatalogStore` через конструктор і не знає жодного конкретного класу.
+Пакет `Microsoft.Extensions.DependencyInjection` не підключено: залежності передаються вручну через `new`.
+
+### Запуск
+
+```powershell
+dotnet run --project src/Cli              # Сховище: InMemoryCatalogStore – після виходу дані зникають
+dotnet run --project src/Cli -- --file    # Сховище: FileCatalogStore – дані накопичуються між запусками
+```
+
+Файлове сховище зберігає дані у `data/catalog.json` поруч із зібраним застосунком
+(`src/Cli/bin/Debug/net10.0/data/catalog.json`); повний шлях програма друкує на початку.
+На диск записуються DTO (`ProductDto`), а сутності відновлюються через `Product.FromDto`.
+
+Сценарій: додати товар, прихід 25, видача 10, знайти за id, показати список, пошук з умовою,
+три відмови (прихід для неіснуючого id, видача понад залишок, дубль id) – із зрозумілим текстом.
+
+### Додаткові завдання
+
+1. **Декоратор** `CachingCatalogStore`: приймає інше `ICatalogStore` і кешує список. Прапорець `--cache`.
+2. **Пошук з умовою**: `CatalogService.FindAll(Func<Product, bool>)`, наприклад `p => p.Quantity < 20`.
+3. **Фабрика** `StoreFactory.Create(args, dataPath)` – прапорець `--factory`. Порівняння:
+   у варіанті «все в Program.cs» видно одразу, що створюється, і це зручно, поки варіантів два.
+   Фабрика прибирає розгалуження з точки входу і стане в пригоді, коли сховищ побільшає,
+   але конкретні класи тепер згадуються у двох місцях Cli.
