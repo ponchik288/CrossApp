@@ -39,6 +39,16 @@ public sealed class CatalogService(ICatalogStore store, INotificationSink? sink 
         OnChanged(product, CatalogChangeKind.Issued, -quantity);
     }
 
+    // Повна заміна даних товару (PUT в Api). Id лишається тим самим; новий стан проходить усі перевірки Create.
+    public Product Replace(string id, string sku, string name, string unit, int quantity)
+    {
+        Product existing = Require(id);
+        Product replacement = Product.Create(existing.Id, sku, name, unit, quantity);
+        _store.Update(replacement);
+        OnChanged(replacement, CatalogChangeKind.Updated, quantity - existing.Quantity);
+        return replacement;
+    }
+
     public bool Remove(string id)
     {
         Product? product = _store.GetById(id);

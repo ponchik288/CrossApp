@@ -1,0 +1,54 @@
+@host = http://localhost:5080
+
+### Стан сервісу
+GET {{host}}/health
+
+### Список (перша сторінка, 5 записів)
+GET {{host}}/api/products?page=1&pageSize=5
+
+### Пошук
+GET {{host}}/api/products?search=цем
+
+### Товари, що закінчуються
+GET {{host}}/api/products/low-stock?threshold=10
+
+### Створити (201 + Location)
+# @name created
+POST {{host}}/api/products
+Content-Type: application/json
+
+{ "sku": "A-100", "name": "Цемент М400", "unit": "мішок", "quantity": 40 }
+
+### Прочитати створений
+@id = {{created.response.body.$.id}}
+GET {{host}}/api/products/{{id}}
+
+### Замінити
+PUT {{host}}/api/products/{{id}}
+Content-Type: application/json
+
+{ "sku": "A-100", "name": "Цемент М500", "unit": "мішок", "quantity": 55 }
+
+### Невалідна заміна (400 з переліком полів)
+PUT {{host}}/api/products/{{id}}
+Content-Type: application/json
+
+{ "sku": "A-100", "name": "", "unit": "мішок", "quantity": -1 }
+
+### Прихід
+POST {{host}}/api/products/{{id}}/receive
+Content-Type: application/json
+
+{ "quantity": 10 }
+
+### Видача понад залишок (409)
+POST {{host}}/api/products/{{id}}/issue
+Content-Type: application/json
+
+{ "quantity": 100000 }
+
+### Видалити (204)
+DELETE {{host}}/api/products/{{id}}
+
+### Після видалення (404)
+GET {{host}}/api/products/{{id}}

@@ -34,6 +34,13 @@ CrossApp/
       SampleData.cs          зразкові дані (18 товарів)
       DomainException.cs     виняток бізнес-правил (ЛР8)
       Configuration/         AppOptions – налаштування застосунку (ЛР9)
+    Api/                     HTTP API (Minimal API, ЛР10)
+      Program.cs             DI, обробка помилок, OpenAPI/Scalar
+      Contracts/             DTO запитів і відповідей
+      Endpoints/             маршрути /api/products
+      Validation/            правила FluentValidation і фільтр маршруту
+      Errors/                перетворення винятків на ProblemDetails
+      Api.http               готові запити для перевірки
     Cli/                     консольний застосунок
       Cli.csproj             містить ProjectReference на Core
       Program.cs             конфігурація, composition root і вибір команди
@@ -52,12 +59,13 @@ CrossApp/
       EnvironmentPrinter.cs  вивід інформації про середовище
   tests/
     Core.Tests/              unit-тести Core (xUnit), посилання лише на Core
+    Api.Tests/               інтеграційні тести Api (WebApplicationFactory)
   scripts/
     Show-CoreTargets.ps1     показує Core, зібраний під net8.0 і net10.0
 ```
 
-Залежність одностороння: `Cli → Core`. Core про Cli нічого не знає, тому пізніше
-його зможуть використовувати також Api та Blazor-клієнт.
+Залежності односторонні: `Cli → Core` і `Api → Core`. Core не знає ні про консоль, ні про HTTP,
+тому той самий код використовують обидві точки входу.
 
 Домовленість про каталоги в Core на семестр (створюються разом із першим типом):
 
@@ -79,7 +87,8 @@ dotnet run --project src/Cli -- report-top               # звіти: report-lo
 dotnet run --project src/Cli -- import-async             # асинхронний імпорт data/import.json
 dotnet run --project src/Cli -- config                   # показати діючу конфігурацію
 dotnet run --project src/Cli -- export                   # експорт колекції в JSON
-dotnet test                                              # unit-тести
+dotnet test                                              # unit-тести та інтеграційні тести
+dotnet run --project src/Api                             # HTTP API на http://localhost:5080
 dotnet run --project src/Cli -- data/sample.csv          # імпорт CSV
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
 dotnet run --project src/Cli -- data/mixed.csv --mixed   # товари і склади в одному файлі
@@ -626,3 +635,83 @@ ApiKey: присутній, довжина 13
 Каталог `data/` у корені репозиторію містить лише зразкові вхідні файли; під час збірки вони копіюються
 в каталог `samples` поруч із застосунком. Робочі дані (`data/items.json`) і лог створюються під час
 роботи всередині `bin`, тому в Git не потрапляють.
+
+## ЛР10. Minimal API: CRUD, валідація, OpenAPI (Scalar)
+
+Друга точка входу – `src/Api`. Вона використовує той самий Core, що й Cli; Core не має посилань на ASP.NET.
+
+### Запуск
+
+```powershell
+dotnet run --project src/Api
+```
+
+Порт зафіксовано в `src/Api/Properties/launchSettings.json`: **http://localhost:5080**.
+Якщо порт зайнятий: `dotnet run --project src/Api --urls http://localhost:5090`.
+
+- Scalar UI: http://localhost:5080/scalar/v1
+- Документ OpenAPI: http://localhost:5080/openapi/v1.json
+- Перевірка стану: http://localhost:5080/health
+
+OpenAPI і Scalar увімкнені лише в середовищі Development.
+
+### Маршрути
+
+| Метод | Шлях | Тіло | Коди відповідей |
+|---|---|---|---|
+| GET | `/api/products?page=1&pageSize=50&search=...` | – | 200 `{ items, total, page, pageSize }` |
+| GET | `/api/products/{id}` | – | 200, 404 |
+| POST | `/api/products` | `SaveProductRequest` | 201 + `Location`, 400, 409 (артикул уже є) |
+| PUT | `/api/products/{id}` | `SaveProductRequest` | 200, 400, 404, 409 |
+| DELETE | `/api/products/{id}` | – | 204, 404 |
+| GET | `/api/products/low-stock?threshold=10` | – | 200 |
+| POST | `/api/products/{id}/receive` | `{ "quantity": 10 }` | 200, 400, 404 |
+| POST | `/api/products/{id}/issue` | `{ "quantity": 10 }` | 200, 400, 404, 409 (не вистачає залишку) |
+| GET | `/health` | – | 200 |
+
+`SaveProductRequest`: `{ "sku": "...", "name": "...", "unit": "...", "quantity": 0 }`.
+Відповідь – `ProductDto` (`id, sku, name, unit, quantity`), а не доменна сутність.
+
+Помилки мають формат ProblemDetails (RFC 9457): 400 – з переліком полів у `errors`,
+404 – ресурсу немає, 409 – порушено бізнес-правило. Stack trace клієнтові не віддається.
+
+### Приклади curl
+
+```bash
+curl -i -X POST http://localhost:5080/api/products \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"A-100","name":"Cement M400","unit":"bag","quantity":40}'
+# HTTP/1.1 201 Created
+# Location: /api/products/cc76da2b
+# {"id":"cc76da2b","sku":"A-100","name":"Cement M400","unit":"bag","quantity":40}
+
+curl -i http://localhost:5080/api/products/cc76da2b            # 200
+curl -i -X DELETE http://localhost:5080/api/products/cc76da2b  # 204
+curl -i http://localhost:5080/api/products/cc76da2b            # 404
+
+curl -i -X POST http://localhost:5080/api/products \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"","name":"X","unit":"","quantity":-1}'
+# HTTP/1.1 400 Bad Request
+# {"title":"One or more validation errors occurred.","status":400,
+#  "errors":{"Sku":["Артикул обов'язковий."],"Unit":["Одиниця виміру обов'язкова."],
+#            "Quantity":["Кількість не може бути від'ємною."]}}
+```
+
+У Windows PowerShell команда `curl` – це інший інструмент; використовуйте `curl.exe` і файл з тілом
+(`--data-binary "@body.json"`) або готові запити з `src/Api/Api.http` у Visual Studio.
+
+### DI
+
+Сховище `ICatalogStore` (у пам'яті, з 18 зразковими товарами) і `CatalogService` зареєстровані як
+**Singleton**: дані мають жити між запитами. Через це `InMemoryCatalogStore` захищено `lock`.
+Обробники маршрутів отримують сховище і сервіс параметрами делегата. Читання йде напряму зі сховища,
+зміни – через сервіс: він перевіряє правила і піднімає події, які записує логер Api.
+
+### Додаткові завдання
+
+1. **Пагінація і пошук**: `GET /api/products?page=1&pageSize=20&search=...` → `{ items, total, page, pageSize }`.
+2. **FluentValidation** через `AddEndpointFilter<ValidationFilter<T>>()`: обробник не викликається, якщо тіло не пройшло правила.
+3. **DomainException → 409** окремим обробником винятків `DomainExceptionHandler` (`IExceptionHandler`).
+4. **Інтеграційні тести** `tests/Api.Tests` на `WebApplicationFactory`: POST дає 201, GET за `Location` – 200;
+   також 400 з полями, 404, 409 і видалення.
