@@ -43,6 +43,10 @@ CrossApp/
   .editorconfig              єдиний стиль коду (ЛР13)
   .gitattributes             однакові кінці рядків на всіх ОС
   Directory.Build.props      спільні налаштування проєктів і аналізатори
+  Dockerfile                 образ Api (multi-stage, ЛР14)
+  docker-compose.yml         запуск Api і Web однією командою
+  .dockerignore, .env.example
+  docker-data/               том контейнера з файлом SQLite (вміст не в Git)
   data/                      зразкові вхідні файли (sample.csv, import.json тощо)
   src/
     Core/                    бібліотека класів (спільна логіка)
@@ -688,7 +692,7 @@ dotnet run --project src/Api
 
 - Scalar UI: http://localhost:5080/scalar/v1
 - Документ OpenAPI: http://localhost:5080/openapi/v1.json
-- Перевірка стану: http://localhost:5080/health
+- Перевірка стану: http://localhost:5080/health (200 `Healthy`)
 
 OpenAPI і Scalar увімкнені лише в середовищі Development.
 
@@ -947,3 +951,76 @@ dotnet test                           # 55 тестів
 3. **Версіонування маршрутів**: `/api/v1/products`. Стара адреса `/api/products` лишається псевдонімом v1.
    Коли контракт зміниться несумісно, з'явиться `/api/v2/...`, а v1 працюватиме без змін, доки клієнти
    не перейдуть; після цього v1 позначається застарілим і згодом видаляється.
+
+## ЛР14. Запуск у Docker
+
+Api і Web упаковані в контейнерні образи. Потрібен Docker Desktop (або Podman з Compose).
+З кореня репозиторію вся система запускається однією командою:
+
+```bash
+docker compose up --build        # запуск (з -d – у фоні)
+docker compose ps                # стан сервісів
+docker compose logs -f api       # логи Api
+docker compose down              # зупинка; дані в ./docker-data лишаються
+docker compose down -v           # зупинка з видаленням named volumes (у нас їх немає; ./docker-data не чіпає)
+```
+
+| Що | Адреса з хоста |
+|---|---|
+| Api, перевірка стану | http://localhost:8080/health |
+| Api, товари | http://localhost:8080/api/v1/products |
+| Web (Blazor-клієнт) | http://localhost:8090/products |
+
+Scalar у контейнері вимкнений: образ працює в середовищі Production.
+
+**Якщо порт зайнятий** – змініть ліву частину `ports` або значення у файлі `.env`
+(скопіюйте `.env.example` у `.env`): `API_PORT=8081`. Код і образ перезбирати не потрібно.
+
+### Що всередині образу, а що зовні
+
+- **Усередині** (`Dockerfile`, два етапи): на етапі `build` образ SDK відновлює пакети і публікує Api;
+  у фінальний образ `aspnet:10.0` копіюється лише результат `dotnet publish`. SDK, компілятор і вихідний
+  код у фінальний образ не потрапляють.
+- **Зовні**: конфігурація і дані. Порт, рядок підключення та режим міграцій передаються змінними
+  середовища в `docker-compose.yml`:
+
+| Змінна | Ключ конфігурації | Значення в compose |
+|---|---|---|
+| `ASPNETCORE_URLS` | адреса Kestrel | `http://+:8080` |
+| `ConnectionStrings__AppDb` | `ConnectionStrings:AppDb` | `Data Source=/app/data/app.db` |
+| `Database__MigrateOnStartup` | `Database:MigrateOnStartup` | `true` |
+| `Cors__WebOrigin` | `Cors:WebOrigin` | `http://localhost:8090` |
+| `Api__BaseUrl` (сервіс web) | `Api:BaseUrl` | `http://api:8080` |
+
+**Дані.** Файл бази лежить у томі `./docker-data:/app/data` (bind mount): на хості це
+`docker-data/app.db`. Він не входить у шар образу чи контейнера, тому переживає
+`docker compose down && docker compose up -d`. У репозиторії каталог `data/` уже зайнятий зразковими
+файлами для Cli, тому для тому використано окремий каталог `docker-data/` (у `.gitignore`, крім `.gitkeep`).
+
+**Міграції.** Обрано спосіб «під час запуску»: якщо `Database:MigrateOnStartup = true`, Api викликає
+`Database.Migrate()` перед прийомом запитів. Це найпростіше для навчального проєкту з одним екземпляром Api;
+окрема команда `dotnet ef database update` потребувала б EF-інструментів у образі.
+
+**Web і контейнер Api.** Усередині мережі compose Web звертається до Api за іменем сервісу:
+`Api__BaseUrl=http://api:8080`. Якщо Web запущено локально (`dotnet run --project src/Web`), а Api –
+у контейнері, вкажіть `Api__BaseUrl=http://localhost:8080`. Адреса не захардкоджена: вона береться з конфігурації.
+
+**Healthcheck у compose** не додано: образ `aspnet` не містить `curl` чи `wget`. Стан перевіряється
+запитом з хоста на `/health`.
+
+У compose немає паролів і ключів: SQLite не потребує облікових даних. Якби вони були, їх місце –
+у `.env` (не в Git) для розробки і в сховищі секретів у продакшені.
+
+### Додаткові завдання
+
+1. **Сервіс `web`** у compose (Blazor-клієнт, `src/Web/Dockerfile`): уся система піднімається однією командою.
+2. **Багатоплатформна збірка** – щоб той самий образ працював і на x64, і на ARM64 (наприклад, Apple Silicon чи Raspberry Pi):
+   `docker buildx build --platform linux/amd64,linux/arm64 -t crossapp-api .`
+3. **Файл `.env`** з портами і назвою файлу БД; у compose підстановка `${API_PORT:-8080}`, `${WEB_PORT:-8090}`, `${DB_FILE:-app.db}`.
+4. **Публікація образу в GitHub Container Registry** (вручну):
+
+```bash
+echo <TOKEN> | docker login ghcr.io -u ponchik288 --password-stdin
+docker tag crossapp-api ghcr.io/ponchik288/crossapp-api:lab14
+docker push ghcr.io/ponchik288/crossapp-api:lab14
+```

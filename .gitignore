@@ -485,3 +485,7 @@ $RECYCLE.BIN/
 *.db
 *.db-shm
 *.db-wal
+
+# Дані контейнера (том ./docker-data:/app/data): у репозиторії лише порожній каталог
+docker-data/*
+!docker-data/.gitkeep
