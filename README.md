@@ -17,7 +17,7 @@ CrossApp/
   CrossApp.sln
   README.md
   .gitignore
-  data/                      тестові дані (sample.csv, sample.json, mixed.csv)
+  data/                      зразкові вхідні файли (sample.csv, import.json тощо)
   src/
     Core/                    бібліотека класів (спільна логіка)
       Core.csproj
@@ -33,9 +33,14 @@ CrossApp/
       Reports/               LINQ-звіти і їхні DTO (ЛР7)
       SampleData.cs          зразкові дані (18 товарів)
       DomainException.cs     виняток бізнес-правил (ЛР8)
+      Configuration/         AppOptions – налаштування застосунку (ЛР9)
     Cli/                     консольний застосунок
       Cli.csproj             містить ProjectReference на Core
-      Program.cs             composition root і вибір команди
+      Program.cs             конфігурація, composition root і вибір команди
+      appsettings.json       налаштування (+ .Development.json, .Production.json)
+      CliSettings.cs         збирання конфігурації і шляхів
+      DataCommands.cs        config, export, add
+      FileLog.cs             лог у файл з мінімальним рівнем
       CatalogCommand.cs      сценарій роботи з каталогом
       EventsCommand.cs       підписка на події, лог у файл
       ReportCommand.cs       підкоманди звітів
@@ -62,7 +67,8 @@ CrossApp/
 
 ## Збірка і запуск
 
-Усі команди виконуються з кореня репозиторію.
+Команди наведено для кореня репозиторію, але з ЛР9 застосунок можна запускати з будь-якого каталогу:
+дані, лог і зразкові файли шукаються відносно каталогу застосунку, а не поточного каталогу.
 
 ```powershell
 dotnet build
@@ -71,6 +77,8 @@ dotnet run --project src/Cli -- --file                   # каталог, фа�
 dotnet run --project src/Cli -- events                   # події сервісу і лог logs/app.log
 dotnet run --project src/Cli -- report-top               # звіти: report-low, report-groups, report-sum
 dotnet run --project src/Cli -- import-async             # асинхронний імпорт data/import.json
+dotnet run --project src/Cli -- config                   # показати діючу конфігурацію
+dotnet run --project src/Cli -- export                   # експорт колекції в JSON
 dotnet test                                              # unit-тести
 dotnet run --project src/Cli -- data/sample.csv          # імпорт CSV
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
@@ -318,8 +326,8 @@ dotnet run --project src/Cli              # Сховище: InMemoryCatalogStore
 dotnet run --project src/Cli -- --file    # Сховище: FileCatalogStore – дані накопичуються між запусками
 ```
 
-Файлове сховище зберігає дані у `data/catalog.json` поруч із зібраним застосунком
-(`src/Cli/bin/Debug/net10.0/data/catalog.json`); повний шлях програма друкує на початку.
+Файлове сховище зберігає дані у файлі з конфігурації (з ЛР9 – `data/items.json` поруч із зібраним
+застосунком, `src/Cli/bin/Debug/net10.0/data/items.json`); повний шлях програма друкує на початку.
 На диск записуються DTO (`ProductDto`), а сутності відновлюються через `Product.FromDto`.
 
 Сценарій: додати товар, прихід 25, видача 10, знайти за id, показати список, пошук з умовою,
@@ -525,3 +533,96 @@ Passed!  - Failed:     0, Passed:    39, Skipped:     0, Total:    39
    `EnvironmentInfo` (залежить від машини, де запускають), `SampleData` (демо-дані), `MixedCsvImporter`
    і `ProductJsonImporter` (додаткові імпортери ЛР3), частина звітів з додаткових завдань ЛР7.
    Це прийнятно: основні правила домену, сервіс, сховища й обов'язкові звіти покриті на 84–100 %.
+
+## ЛР9. Шляхи, JSON, конфігурація, secrets
+
+У коді немає абсолютних шляхів і паролів. Усі шляхи будуються через `Path.Combine` від
+`AppContext.BaseDirectory`, тому запуск з кореня solution і з `src/Cli` працює з тим самим файлом даних.
+
+### Профілі
+
+| Профіль | Як увімкнути | Лог | Де лежать дані |
+|---|---|---|---|
+| Development (за замовчуванням) | нічого не робити | рівень `Debug` – детальний | `data/items.json` поруч із застосунком |
+| Production | `CROSSAPP_ENVIRONMENT=Production` | рівень `Warning` | `%LOCALAPPDATA%/CrossApp/data/items.json` (каталог локальних даних користувача) |
+
+### Ключі конфігурації
+
+| Ключ | За замовчуванням | Змінна середовища | Призначення |
+|---|---|---|---|
+| `EnvironmentName` | `Development` | `CROSSAPP_ENVIRONMENT` (вибір файла профілю) | назва середовища |
+| `Storage:DataPath` | `data` | `CROSSAPP_Storage__DataPath` або проста `CROSSAPP_DATA_PATH` | каталог даних (відносний – від каталогу застосунку) |
+| `Storage:FileName` | `items.json` | `CROSSAPP_Storage__FileName` | ім'я файлу даних |
+| `Storage:UseLocalAppData` | `false` | `CROSSAPP_Storage__UseLocalAppData` | тримати дані в каталозі користувача |
+| `Logging:MinimumLevel` | `Information` | `CROSSAPP_Logging__MinimumLevel` | `Debug` / `Information` / `Warning` / `Error` |
+| `Warehouse:DefaultUnit` | `шт` | `CROSSAPP_Warehouse__DefaultUnit` | одиниця виміру для команди `add` |
+| `Integration:ApiKey` | немає | `CROSSAPP_Integration__ApiKey` | secret; у репозиторії відсутній |
+
+Порядок джерел (пізніше перекриває попереднє): `appsettings.json` → `appsettings.{середовище}.json` →
+user-secrets → змінні середовища з префіксом `CROSSAPP_` → аргументи виду `--Storage:FileName=x.json`.
+Налаштування біндяться в `Core/Configuration/AppOptions` через `config.Get<AppOptions>()`.
+
+### Перевизначення
+
+PowerShell:
+
+```powershell
+$env:CROSSAPP_DATA_PATH = "$env:TEMP\crossdata"
+dotnet run --project src/Cli -- export
+Remove-Item Env:CROSSAPP_DATA_PATH
+```
+
+bash:
+
+```bash
+CROSSAPP_DATA_PATH=/tmp/crossdata dotnet run --project src/Cli -- export
+CROSSAPP_Storage__FileName=other.json dotnet run --project src/Cli -- config
+```
+
+### Secret
+
+`Integration:ApiKey` зберігається в user-secrets, поза репозиторієм; у `Cli.csproj` є лише `UserSecretsId`.
+
+```powershell
+dotnet user-secrets set "Integration:ApiKey" "<значення>" --project src/Cli
+dotnet user-secrets list --project src/Cli
+```
+
+Файл лежить у `%APPDATA%\Microsoft\UserSecrets\<UserSecretsId>\secrets.json` (Windows) або
+`~/.microsoft/usersecrets/<UserSecretsId>/secrets.json` (Linux, macOS). Програма друкує лише факт
+наявності: `ApiKey: присутній, довжина 13`. Це засіб для розробки; у продакшені secret передають
+змінною середовища або зі спеціального сховища.
+
+### JSON
+
+`export` записує всю колекцію, `import-async <файл>` читає її назад. Файлове сховище і експорт
+використовують один формат (`Core/Storage/CatalogJson.cs`): camelCase, відступи, кирилиця без `\uXXXX`.
+Запис атомарний: спершу у `items.json.tmp`, потім `File.Move` з заміною – якщо програма впаде
+посеред запису, старий файл залишиться цілим. Зіпсований файл даних дає зрозуміле повідомлення,
+а не stack trace.
+
+```text
+> dotnet run --project src/Cli -- export
+Середовище : Development
+Файл даних : ...\src\Cli\bin\Debug\net10.0\data\items.json
+Файл логу  : ...\src\Cli\bin\Debug\net10.0\logs\app.log (рівень Debug)
+Одиниця за замовчуванням : шт
+ApiKey: присутній, довжина 13
+Експортовано записів: 18
+```
+
+```json
+[
+  {
+    "id": "P-001",
+    "sku": "SKU-001",
+    "name": "Цемент М400 25кг",
+    "unit": "шт",
+    "quantity": 120
+  }
+]
+```
+
+Каталог `data/` у корені репозиторію містить лише зразкові вхідні файли; під час збірки вони копіюються
+в каталог `samples` поруч із застосунком. Робочі дані (`data/items.json`) і лог створюються під час
+роботи всередині `bin`, тому в Git не потрапляють.

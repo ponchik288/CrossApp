@@ -52,7 +52,7 @@ internal static class DomainDemo
 
         Console.WriteLine();
         Console.WriteLine("=== Сценарій 5: сутності з результату імпорту ===");
-        string path = Path.Combine("data", "stock.csv");
+        string path = CliSettings.Sample("stock.csv");
         if (!File.Exists(path))
         {
             Console.WriteLine($"  Файл не знайдено: {Path.GetFullPath(path)}");

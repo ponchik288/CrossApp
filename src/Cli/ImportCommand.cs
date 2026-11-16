@@ -8,8 +8,8 @@ internal static class ImportCommand
 {
     public static int Run(string[] args)
     {
-        // Шлях до файлу — перший аргумент, інакше data/sample.csv.
-        string path = args.Length > 0 ? args[0] : Path.Combine("data", "sample.csv");
+        // Шлях до файлу — перший аргумент, інакше зразковий sample.csv поруч із застосунком.
+        string path = args.Length > 0 ? args[0] : CliSettings.Sample("sample.csv");
 
         if (!File.Exists(path))
         {

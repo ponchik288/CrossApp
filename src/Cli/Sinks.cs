@@ -15,6 +15,6 @@ internal sealed class FileSink(string path) : INotificationSink
     public void Notify(CatalogChangedEventArgs change)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.AppendAllText(path, $"[sink] {EventsCommand.Format(change)}{Environment.NewLine}");
+        File.AppendAllText(path, $"[Information] [sink] {EventsCommand.Format(change)}{Environment.NewLine}");
     }
 }

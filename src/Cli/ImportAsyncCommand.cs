@@ -12,8 +12,8 @@ internal static class ImportAsyncCommand
 {
     public static async Task<int> RunAsync(CatalogService service, string[] args)
     {
-        // Шлях — перший аргумент після назви команди, інакше data/import.json.
-        string path = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? Path.Combine("data", "import.json");
+        // Шлях — перший аргумент після назви команди, інакше зразковий import.json поруч із застосунком.
+        string path = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? CliSettings.Sample("import.json");
 
         // Два джерела скасування: користувач (Ctrl+C) і таймаут. Зв'язаний токен спрацьовує від будь-якого.
         using var userCts = new CancellationTokenSource();

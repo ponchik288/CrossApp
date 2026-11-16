@@ -11,7 +11,7 @@ internal static class EventsCommand
     public static string Format(CatalogChangedEventArgs e) =>
         $"{e.At:HH:mm:ss} {e.Kind,-8} {e.Id} {e.Delta,4:+0;-0} → залишок {e.QuantityAfter}";
 
-    public static int Run(CatalogService service, string logPath)
+    public static int Run(CatalogService service, string logPath, FileLog log)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 
@@ -20,7 +20,7 @@ internal static class EventsCommand
         {
             string line = Format(e);
             Console.WriteLine(line);
-            File.AppendAllText(logPath, line + Environment.NewLine);
+            log.Info(line);
         }
 
         service.Changed += OnCatalogChanged;
@@ -58,8 +58,11 @@ internal static class EventsCommand
 
         Console.WriteLine();
         Console.WriteLine($"Лог: {logPath}");
-        foreach (string line in File.ReadLines(logPath).TakeLast(4))
-            Console.WriteLine($"  {line}");
+        if (File.Exists(logPath))
+        {
+            foreach (string line in File.ReadLines(logPath).TakeLast(4))
+                Console.WriteLine($"  {line}");
+        }
 
         return 0;
     }

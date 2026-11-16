@@ -9,8 +9,6 @@ namespace Core.Storage;
 // Файл читається один раз при першому зверненні (кеш), а записується після кожної зміни.
 public sealed class FileCatalogStore(string path) : ICatalogStore
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
-
     private readonly Dictionary<string, Product> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _path = Path.GetFullPath(path);
     private bool _loaded;
@@ -63,25 +61,39 @@ public sealed class FileCatalogStore(string path) : ICatalogStore
         if (_loaded)
             return;
 
-        if (File.Exists(_path))
+        if (!File.Exists(_path))
         {
-            var dtos = JsonSerializer.Deserialize<List<ProductDto>>(File.ReadAllText(_path)) ?? [];
+            _loaded = true;
+            return;
+        }
 
-            // На диску лежать DTO; сутність відновлюємо через FromDto, тобто з усіма перевірками.
-            foreach (ProductDto dto in dtos)
+        List<ProductDto?> dtos;
+        try
+        {
+            dtos = JsonSerializer.Deserialize<List<ProductDto?>>(File.ReadAllText(_path), CatalogJson.Options) ?? [];
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException($"Файл даних {_path} пошкоджений: це не коректний JSON.", ex);
+        }
+
+        _cache.Clear();
+        for (int i = 0; i < dtos.Count; i++)
+        {
+            try
             {
-                Product product = Product.FromDto(dto);
+                // На диску лежать DTO; FromDto повторно перевіряє інваріанти.
+                Product product = Product.FromDto(dtos[i] ?? throw new ArgumentException("порожній елемент"));
                 _cache[product.Id] = product;
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException($"Файл даних {_path}: запис {i + 1} некоректний ({ex.Message}).", ex);
             }
         }
 
         _loaded = true;
     }
 
-    private void Flush()
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        File.WriteAllText(_path,
-            JsonSerializer.Serialize(_cache.Values.Select(p => p.ToDto()).ToList(), Options));
-    }
+    private void Flush() => CatalogJson.WriteAtomic(_path, _cache.Values);
 }
