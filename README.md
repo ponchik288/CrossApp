@@ -29,11 +29,14 @@ CrossApp/
       Abstractions/          інтерфейс сховища ICatalogStore (ЛР5)
       Storage/               сховища: у пам'яті, файлове, кешуюче (ЛР5)
       Services/              CatalogService – бізнес-операції (ЛР5)
+      Events/                дані події зміни каталогу (ЛР6)
       SampleData.cs          зразкові дані (18 товарів)
     Cli/                     консольний застосунок
       Cli.csproj             містить ProjectReference на Core
       Program.cs             composition root і вибір команди
       CatalogCommand.cs      сценарій роботи з каталогом
+      EventsCommand.cs       підписка на події, лог у файл
+      Sinks.cs               одержувачі сповіщень (консоль, файл)
       StoreFactory.cs        вибір сховища через фабрику
       ImportCommand.cs       імпорт із файлу і вивід результату
       DomainDemo.cs          демонстрація доменної моделі
@@ -59,6 +62,7 @@ CrossApp/
 dotnet build
 dotnet run --project src/Cli                             # каталог, сховище в пам'яті
 dotnet run --project src/Cli -- --file                   # каталог, файлове сховище
+dotnet run --project src/Cli -- events                   # події сервісу і лог logs/app.log
 dotnet run --project src/Cli -- data/sample.csv          # імпорт CSV
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
 dotnet run --project src/Cli -- data/mixed.csv --mixed   # товари і склади в одному файлі
@@ -320,3 +324,57 @@ dotnet run --project src/Cli -- --file    # Сховище: FileCatalogStore –
    у варіанті «все в Program.cs» видно одразу, що створюється, і це зручно, поки варіантів два.
    Фабрика прибирає розгалуження з точки входу і стане в пригоді, коли сховищ побільшає,
    але конкретні класи тепер згадуються у двох місцях Cli.
+
+## ЛР6. Доменні події, делегати Action/Func, лямбди
+
+Сервіс повідомляє про зміни подією, а не друкує сам. Core не знає ні про консоль, ні про лог-файл:
+що робити зі сповіщенням, вирішує той, хто підписався.
+
+- `Core/Events/CatalogChangeKind.cs` – вид зміни: `Added`, `Received`, `Issued`, `Removed`.
+- `Core/Events/CatalogChangedEventArgs.cs` – дані події: Id, вид, дельта, залишок після, час.
+- `CatalogService.Changed` – `event EventHandler<CatalogChangedEventArgs>?`; піднімається в одному
+  місці (`OnChanged`) і лише після успішної зміни. Якщо інваріант кинув виняток, події немає.
+
+Подіями вважаються зміни стану каталогу: додавання товару, прихід, видача, видалення.
+
+Підписники в Cli (`EventsCommand.cs`):
+
+1. локальний метод `OnCatalogChanged` – друкує рядок у консоль і дописує його в `logs/app.log`;
+2. лямбда `(_, _) => changes++` – лічильник подій (замикання над локальною змінною).
+
+Після `service.Changed -= OnCatalogChanged` операція виконується, але рядка в консолі й у лозі немає –
+лічильник при цьому зростає, бо лямбду не відписували.
+
+Лог лежить у `logs/app.log` поруч із застосунком; шлях будується через `Path.Combine` від
+`AppContext.BaseDirectory`, каталог створюється кодом.
+
+```powershell
+dotnet run --project src/Cli -- events
+```
+
+```text
+21:39:29 Added    13eef464  +50 → залишок 50
+21:39:29 Received 13eef464  +25 → залишок 75
+21:39:29 Issued   13eef464  -10 → залишок 65
+Подій отримано: 3
+
+Відмови (події не виникають):
+  прихід з від'ємною кількістю: Кількість приходу має бути більшою за нуль (Parameter 'amount') Actual value was -5.
+  прихід для неіснуючого id: Немає запису з id=нема.
+Подій отримано: 3
+
+Після відписки OnCatalogChanged:
+Подій отримано: 4
+```
+
+`Func` використано там, де потрібне значення у відповідь: `CatalogService.FindAll(Func<Product, bool>)`,
+наприклад `service.FindAll(p => p.Quantity < 10)`.
+
+### Додаткові завдання
+
+1. **INotificationSink** (`Core/Abstractions`) з реалізаціями `ConsoleSink` і `FileSink` у Cli; сервіс
+   отримує його через конструктор. Прапорці `--sink` і `--sink-file`. Порівняно з подією: одержувач
+   один і задається під час створення сервісу, його не можна додати чи зняти під час роботи;
+   зате залежність видно в конструкторі. Подія дозволяє будь-яку кількість підписників і відписку.
+2. **Action<string> в імпорті**: `ProductCsvImporter.Load(path, onSkipped)` викликає делегат одразу
+   для кожного пропущеного рядка. Прапорець `--trace`: `dotnet run --project src/Cli -- data/sample.csv --trace`.

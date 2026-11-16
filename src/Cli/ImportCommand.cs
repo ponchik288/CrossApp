@@ -27,7 +27,9 @@ internal static class ImportCommand
         // Імпортер обираємо за розширенням файлу.
         ImportResult<ProductDto>? result = Path.GetExtension(path).ToLowerInvariant() switch
         {
-            ".csv" => ProductCsvImporter.Load(path),
+            ".csv" => args.Contains("--trace")
+                ? ProductCsvImporter.Load(path, e => Console.WriteLine($"  [пропуск під час читання] {e}"))
+                : ProductCsvImporter.Load(path),
             ".json" => ProductJsonImporter.Load(path),
             _ => null
         };

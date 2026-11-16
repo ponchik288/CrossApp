@@ -26,7 +26,15 @@ else
         store = new CachingCatalogStore(store);
 }
 
-var service = new CatalogService(store);
+string logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
+
+// Одержувач сповіщень через конструктор (додаткове завдання ЛР6); без прапорця його немає.
+INotificationSink? sink =
+    args.Contains("--sink-file") ? new FileSink(logPath) :
+    args.Contains("--sink") ? new ConsoleSink() :
+    null;
+
+var service = new CatalogService(store, sink);
 
 // Команда — перший аргумент без "--". Без команди запускається сценарій каталогу.
 string command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "catalog";
@@ -34,6 +42,7 @@ string command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "catalog";
 return command switch
 {
     "catalog" => CatalogCommand.Run(service, store, dataPath),
+    "events" => EventsCommand.Run(service, logPath),
     "import" => ImportCommand.Run(args.Skip(1).ToArray()),
     "demo" => DomainDemo.Run(),
     "env" => EnvironmentPrinter.Print(args.Contains("--json")),
