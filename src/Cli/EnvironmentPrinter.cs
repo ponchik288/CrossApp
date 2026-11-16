@@ -10,7 +10,7 @@ internal static class EnvironmentPrinter
 {
     private const string Domain = "Склад (товари, партії, залишки, переміщення)";
 
-    public static void Print(bool jsonMode)
+    public static int Print(bool jsonMode)
     {
         EnvironmentReport report = EnvironmentInfo.Collect();
 
@@ -18,6 +18,8 @@ internal static class EnvironmentPrinter
             PrintJson(report);
         else
             PrintText(report);
+
+        return 0;
     }
 
     private static void PrintJson(EnvironmentReport report)

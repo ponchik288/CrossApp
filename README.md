@@ -25,9 +25,12 @@ CrossApp/
       EnvironmentInfo.cs     збирає ці дані
       Dto/                   record-типи формату даних (ЛР3)
       Import/                імпортери CSV і JSON (ЛР3)
+      Domain/                сутності з інваріантами (ЛР4)
     Cli/                     консольний застосунок
       Cli.csproj             містить ProjectReference на Core
-      Program.cs             аргументи, виклик Core, вивід
+      Program.cs             вибір команди за першим аргументом
+      ImportCommand.cs       імпорт із файлу і вивід результату
+      DomainDemo.cs          демонстрація доменної моделі
       EnvironmentPrinter.cs  вивід інформації про середовище
   scripts/
     Show-CoreTargets.ps1     показує Core, зібраний під net8.0 і net10.0
@@ -51,6 +54,7 @@ dotnet build
 dotnet run --project src/Cli                             # імпорт data/sample.csv
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
 dotnet run --project src/Cli -- data/mixed.csv --mixed   # товари і склади в одному файлі
+dotnet run --project src/Cli -- demo                     # доменна модель: успіх і порушення правил
 dotnet run --project src/Cli -- env                      # інформація про середовище
 dotnet run --project src/Cli -- env --json               # те саме одним JSON-рядком
 ```
@@ -204,3 +208,63 @@ Trimmer видаляє код, на який немає прямих посил�
 2. **Змішаний файл** `data/mixed.csv`: рядки `P;...` – товари, `W;...` – склади;
    один switch у `MixedCsvImporter` повертає два різні типи результату.
 3. **Статистика імпорту** одним рядком: усього / прийнято / пропущено / % помилок.
+
+## ЛР4. Доменна модель: сутності, інваріанти, інкапсуляція
+
+У `Core/Domain` з'явилися сутності з поведінкою. Records з ЛР3 залишилися як DTO (формат даних),
+а сутність захищає правила: створити об'єкт у некоректному стані або перевести в нього неможливо.
+
+| Сутність | Що робить |
+|---|---|
+| `Product` | товар із залишком: `Create`, `RegisterArrival`, `Issue`, `Rename`, `ToDto` / `FromDto` |
+| `Warehouse` | склад зі списком товарів: `Create`, `AddProduct`, `FindBySku`; список назовні лише для читання |
+| `Movement` | документ переміщення зі станом `Draft` / `Confirmed` / `Cancelled` |
+
+Стан інкапсульовано: залишок лежить у приватному полі `_quantity`, публічних сетерів немає,
+конструктори приватні, об'єкти створюються лише через фабричний метод `Create`.
+
+### Інваріанти
+
+| № | Правило | Виняток | Де перевіряється |
+|---|---|---|---|
+| 1 | Id, SKU, назва й одиниця виміру товару не порожні | `ArgumentException` | `Product.Create` |
+| 2 | Початковий залишок не від'ємний | `ArgumentOutOfRangeException` | `Product.Create` |
+| 3 | Кількість приходу і видачі більша за нуль | `ArgumentOutOfRangeException` | `Product.RegisterArrival`, `Product.Issue` |
+| 4 | Не можна видати більше, ніж є на залишку | `InvalidOperationException` | `Product.Issue` |
+| 5 | Нова назва товару не порожня | `ArgumentException` | `Product.Rename` |
+| 6 | На одному складі немає двох товарів з однаковим SKU | `InvalidOperationException` | `Warehouse.AddProduct` |
+| 7 | Переміщати можна лише той самий товар (однаковий SKU) | `InvalidOperationException` | `StockTransfer.Move` |
+| 8 | Підтверджене або скасоване переміщення змінити не можна | `InvalidOperationException` | `Movement.Confirm`, `Movement.Cancel` |
+
+`Argument*` – некоректний сам аргумент; `InvalidOperation` – аргумент нормальний, але операція
+неможлива в поточному стані. `FromDto` викликає `Create`, тому дані з файлу проходять ті самі перевірки.
+У `Core/Domain` немає звернень ні до `Console`, ні до `File`.
+
+### Запуск
+
+```powershell
+dotnet run --project src/Cli -- demo
+```
+
+```text
+=== Сценарій 1: успіх ===
+P-001 [SKU-001] Цемент М400 25кг — 100 шт
+P-001 [SKU-001] Цемент М400 25кг — 120 шт
+W-01 Головний склад — товарів: 1
+
+=== Сценарій 2: порушення інваріантів ===
+  видача більша за залишок: InvalidOperationException — Не можна видати 1000: залишок SKU-001 = 120
+  порожній SKU: ArgumentException — SKU не може бути порожнім (Parameter 'sku')
+  від'ємний залишок: ArgumentOutOfRangeException — Початковий залишок не може бути від'ємним (Parameter 'quantity') Actual value was -5.
+  ...
+  Після всіх відмов стан не змінився: P-001 [SKU-001] Цемент М400 25кг — 120 шт
+```
+
+### Додаткові завдання
+
+1. **Сутності з результату імпорту**: `ProductFactory.FromImport` бере `ImportResult<ProductDto>` і
+   повертає сутності разом із переліком записів, що не пройшли інваріанти (сценарій 5, `data/stock.csv`).
+2. **Інваріант на дві сутності**: `StockTransfer.Move(from, to, amount)` – переміщення лише між
+   записами одного товару. Правило винесене з сутностей, бо жодна з них не знає про іншу;
+   з ЛР5 такі правила викликатиме сервіс.
+3. **Стан-перелічення**: `MovementStatus` і перевірка дозволених переходів через switch expression у `Movement`.
