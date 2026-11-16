@@ -34,6 +34,11 @@ CrossApp/
       SampleData.cs          зразкові дані (18 товарів)
       DomainException.cs     виняток бізнес-правил (ЛР8)
       Configuration/         AppOptions – налаштування застосунку (ЛР9)
+    Infrastructure/          робота з базою даних (EF Core + SQLite, ЛР11)
+      Persistence/           ProductRow, BatchRow, AppDbContext
+      EfCatalogStore.cs      реалізація ICatalogStore на EF Core
+      EfBatchJournal.cs      журнал надходжень (таблиця Batches)
+      Migrations/            міграції (у Git)
     Api/                     HTTP API (Minimal API, ЛР10)
       Program.cs             DI, обробка помилок, OpenAPI/Scalar
       Contracts/             DTO запитів і відповідей
@@ -64,8 +69,8 @@ CrossApp/
     Show-CoreTargets.ps1     показує Core, зібраний під net8.0 і net10.0
 ```
 
-Залежності односторонні: `Cli → Core` і `Api → Core`. Core не знає ні про консоль, ні про HTTP,
-тому той самий код використовують обидві точки входу.
+Залежності односторонні: `Cli → Core`, `Infrastructure → Core`, `Api → Core + Infrastructure`.
+Core не знає ні про консоль, ні про HTTP, ні про базу даних.
 
 Домовленість про каталоги в Core на семестр (створюються разом із першим типом):
 
@@ -703,8 +708,8 @@ curl -i -X POST http://localhost:5080/api/products \
 
 ### DI
 
-Сховище `ICatalogStore` (у пам'яті, з 18 зразковими товарами) і `CatalogService` зареєстровані як
-**Singleton**: дані мають жити між запитами. Через це `InMemoryCatalogStore` захищено `lock`.
+На ЛР10 сховище було в пам'яті (`InMemoryCatalogStore`, Singleton, захищене `lock`). З ЛР11 це
+`EfCatalogStore` з життєвим циклом **Scoped** – див. розділ ЛР11.
 Обробники маршрутів отримують сховище і сервіс параметрами делегата. Читання йде напряму зі сховища,
 зміни – через сервіс: він перевіряє правила і піднімає події, які записує логер Api.
 
@@ -715,3 +720,67 @@ curl -i -X POST http://localhost:5080/api/products \
 3. **DomainException → 409** окремим обробником винятків `DomainExceptionHandler` (`IExceptionHandler`).
 4. **Інтеграційні тести** `tests/Api.Tests` на `WebApplicationFactory`: POST дає 201, GET за `Location` – 200;
    також 400 з полями, 404, 409 і видалення.
+
+## ЛР11. EF Core + SQLite: міграції, зв'язок 1:N
+
+Api тепер зберігає дані в базі SQLite – один файл `src/Api/data/app.db`. Маршрути і формат відповідей
+ЛР10 не змінилися: замінено лише реалізацію `ICatalogStore` і її реєстрацію в DI.
+
+```text
+Core            – домен та інтерфейси, жодного пакета EF Core
+Infrastructure  – залежить від Core і EF Core, реалізує ICatalogStore
+Api             – залежить від Core та Infrastructure, реєструє реалізації
+```
+
+### Схема
+
+| Таблиця | Поля | Ключі та обмеження |
+|---|---|---|
+| `Products` | Id TEXT(32), Sku TEXT(50), Name TEXT(200), Unit TEXT(20), Quantity INTEGER | PK `Id`; унікальний індекс `IX_Products_Sku` |
+| `Batches` | Id INTEGER, ProductId TEXT, Amount INTEGER, ReceivedAt TEXT | PK `Id` (автоінкремент); FK `ProductId` → `Products.Id`, `ON DELETE CASCADE` |
+
+Зв'язок 1:N: у товару багато партій (надходжень). `Quantity` – поточний залишок, `Batches` – журнал
+надходжень: рядок додає лише операція «прихід» (`POST /api/products/{id}/receive`); переглянути –
+`GET /api/products/{id}/batches`. EF Core мапить `ProductRow`, а не доменний `Product`; рядок
+перетворюється на сутність через `Product.Create`, тобто з усіма перевірками.
+
+### Команди
+
+Потрібен інструмент міграцій (один раз на машину):
+
+```powershell
+dotnet tool install --global dotnet-ef --version "10.*"
+```
+
+```powershell
+dotnet ef migrations add <Назва> --project src/Infrastructure --startup-project src/Api
+dotnet ef database update --project src/Infrastructure --startup-project src/Api
+dotnet ef migrations list --project src/Infrastructure --startup-project src/Api
+```
+
+У середовищі Development Api сам застосовує міграції під час запуску; у Production – командою `database update`.
+
+**Скинути базу:** зупинити Api, видалити `src/Api/data/app.db` і виконати `database update`
+(або просто запустити Api в Development) – схема відтвориться з міграцій.
+
+### Конфігурація
+
+Рядок підключення – ключ `ConnectionStrings:AppDb` у `src/Api/appsettings.json`
+(`Data Source=data/app.db`). Відносний шлях рахується від каталогу проєкту Api (`ContentRootPath`),
+каталог створюється автоматично. Перевизначення змінною середовища: `ConnectionStrings__AppDb`.
+
+Файли `*.db`, `*.db-shm`, `*.db-wal` додані в `.gitignore`; каталог `Migrations` – у Git.
+
+### Перевірка
+
+```text
+POST /api/products {"sku":"P-220511",...}        -> 201
+POST /api/products/{id}/receive {"quantity":10}  -> 200, quantity 50
+повторний POST з тим самим артикулом             -> 409 (а не 500 з UNIQUE constraint)
+... зупинка Api і повторний запуск ...
+GET /api/products?search=P-220511                -> запис на місці, quantity 50
+```
+
+`DbContext`, `EfCatalogStore` і `CatalogService` мають життєвий цикл Scoped: окремий екземпляр на кожен HTTP-запит.
+Інтеграційні тести (`tests/Api.Tests`) працюють із тимчасовим файлом SQLite і перевіряють, зокрема,
+що дані переживають перезапуск Api.

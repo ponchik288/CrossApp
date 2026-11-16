@@ -1,12 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using Api.Contracts;
-using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Api.Tests;
 
 // Інтеграційні тести: Api піднімається в пам'яті (без порту і мережі), запити йдуть через HttpClient.
-public class ProductsApiTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+// База — тимчасовий файл SQLite (див. ApiFactory), який видаляється після тестів.
+public class ProductsApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     private readonly HttpClient _client = factory.CreateClient();
 
@@ -75,5 +75,34 @@ public class ProductsApiTests(WebApplicationFactory<Program> factory) : IClassFi
 
         Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, fetched.StatusCode);
+    }
+
+    [Fact]
+    public async Task Post_WithExistingSku_ReturnsConflict()
+    {
+        await _client.PostAsJsonAsync("/api/products", new SaveProductRequest("T-400", "Перший", "шт", 1));
+
+        HttpResponseMessage second = await _client.PostAsJsonAsync(
+            "/api/products", new SaveProductRequest("t-400", "Другий з тим самим артикулом", "шт", 1));
+
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task Receive_AddsBatchToJournal()
+    {
+        HttpResponseMessage created = await _client.PostAsJsonAsync(
+            "/api/products", new SaveProductRequest("T-500", "З партіями", "шт", 10));
+        ProductDto? product = await created.Content.ReadFromJsonAsync<ProductDto>();
+
+        await _client.PostAsJsonAsync($"/api/products/{product!.Id}/receive", new ChangeQuantityRequest(5));
+        await _client.PostAsJsonAsync($"/api/products/{product.Id}/receive", new ChangeQuantityRequest(7));
+
+        ProductDto? after = await _client.GetFromJsonAsync<ProductDto>($"/api/products/{product.Id}");
+        string batches = await _client.GetStringAsync($"/api/products/{product.Id}/batches");
+
+        Assert.Equal(22, after!.Quantity);
+        Assert.Contains("\"amount\":5", batches);
+        Assert.Contains("\"amount\":7", batches);
     }
 }

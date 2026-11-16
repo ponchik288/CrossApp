@@ -480,3 +480,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# SQLite: файл бази відтворюється міграціями, у репозиторій не потрапляє
+*.db
+*.db-shm
+*.db-wal

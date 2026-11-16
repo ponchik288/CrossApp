@@ -83,14 +83,22 @@ public static class ProductEndpoints
                 ? TypedResults.NoContent()
                 : TypedResults.NotFound());
 
+        // GET /api/products/{id}/batches — журнал надходжень товару
+        group.MapGet("/{id}/batches", Results<Ok<IReadOnlyList<BatchRecord>>, NotFound> (
+            string id, ICatalogStore store, IBatchJournal journal) =>
+            store.GetById(id) is null
+                ? TypedResults.NotFound()
+                : TypedResults.Ok(journal.ForProduct(id)));
+
         // POST /api/products/{id}/receive і /issue — прихід і видача
         group.MapPost("/{id}/receive", Results<Ok<ProductDto>, NotFound> (
-            string id, ChangeQuantityRequest request, ICatalogStore store, CatalogService service) =>
+            string id, ChangeQuantityRequest request, ICatalogStore store, CatalogService service, IBatchJournal journal) =>
         {
             if (store.GetById(id) is null)
                 return TypedResults.NotFound();
 
             service.Receive(id, request.Quantity);
+            journal.Record(id, request.Quantity);       // партія в таблиці Batches (зв'язок 1:N з Products)
             return TypedResults.Ok(ProductDto.From(store.GetById(id)!));
         })
         .AddEndpointFilter<ValidationFilter<ChangeQuantityRequest>>()

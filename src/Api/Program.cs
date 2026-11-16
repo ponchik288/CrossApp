@@ -3,11 +3,10 @@ using Api.Contracts;
 using Api.Endpoints;
 using Api.Errors;
 using Api.Validation;
-using Core;
 using Core.Abstractions;
 using Core.Services;
-using Core.Storage;
 using FluentValidation;
+using Infrastructure;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,9 +19,11 @@ builder.Services.AddExceptionHandler<DomainExceptionHandler>();     // DomainExc
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping);
 
-// Сховище і сервіс — Singleton: дані в пам'яті мають жити між запитами.
-builder.Services.AddSingleton<ICatalogStore>(_ => new InMemoryCatalogStore(SampleData.Products()));
-builder.Services.AddSingleton<CatalogService>(provider =>
+// Сховище тепер на EF Core + SQLite (ЛР11). DbContext, сховище і сервіс — Scoped: свої на кожен HTTP-запит.
+builder.Services.AddInfrastructure(
+    builder.Configuration.GetConnectionString("AppDb"), builder.Environment.ContentRootPath);
+
+builder.Services.AddScoped<CatalogService>(provider =>
 {
     var service = new CatalogService(provider.GetRequiredService<ICatalogStore>());
     ILogger logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("Catalog");
@@ -38,6 +39,10 @@ builder.Services.AddScoped<IValidator<SaveProductRequest>, SaveProductRequestVal
 builder.Services.AddScoped<IValidator<ChangeQuantityRequest>, ChangeQuantityRequestValidator>();
 
 var app = builder.Build();
+
+// У Development схема БД оновлюється під час запуску; у Production — командою dotnet ef database update.
+if (app.Environment.IsDevelopment())
+    app.Services.ApplyMigrations();
 
 app.UseExceptionHandler();      // виняток не показує клієнтові stack trace
 app.UseStatusCodePages();       // 404/405 без тіла теж у форматі ProblemDetails
