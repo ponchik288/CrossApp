@@ -44,7 +44,7 @@ public sealed class Warehouse
     }
 
     public Product? FindBySku(string sku) =>
-        _products.Find(p => p.Sku == sku.Trim().ToUpperInvariant());
+        _products.Find(p => string.Equals(p.Sku, sku.Trim(), StringComparison.OrdinalIgnoreCase));
 
     public WarehouseDto ToDto() => new(Id, Name, Address);
 

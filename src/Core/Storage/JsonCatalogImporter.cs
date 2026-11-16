@@ -40,7 +40,7 @@ public sealed class JsonCatalogImporter : ICatalogImporter
     }
 
     // Потоковий варіант (додаткове завдання 1): записи віддаються по одному, без списку в пам'яті.
-    public async IAsyncEnumerable<Product> StreamAsync(
+    public static async IAsyncEnumerable<Product> StreamAsync(
         string path, [EnumeratorCancellation] CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

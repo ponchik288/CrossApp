@@ -95,7 +95,7 @@ internal static class ReportCommand
         // service.All() щоразу повертає новий знімок, тому для демо беремо локальний список.
         List<Product> source = service.All().ToList();
 
-        IEnumerable<Product> query = service.Filter(source, p => p.Quantity < 10);   // запит побудовано, не виконано
+        IEnumerable<Product> query = CatalogService.Filter(source, p => p.Quantity < 10);   // запит побудовано, не виконано
         Console.WriteLine($"Дефіцитних до змін: {query.Count()}");
 
         source.Add(Product.Create("tmp00001", "SKU-999", "Скоба", "шт", 3));

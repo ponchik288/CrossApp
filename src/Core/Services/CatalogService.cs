@@ -61,7 +61,7 @@ public sealed class CatalogService(ICatalogStore store, INotificationSink? sink 
 
     // Асинхронний імпорт. Імпортер приходить параметром, токен скасування передається далі.
     public async Task<int> ImportAsync(
-        ICatalogImporter importer, string path, CancellationToken ct = default, IProgress<int>? progress = null)
+        ICatalogImporter importer, string path, IProgress<int>? progress = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(importer);
 
@@ -119,7 +119,7 @@ public sealed class CatalogService(ICatalogStore store, INotificationSink? sink 
     }
 
     // Відкладений запит: без ToList(), тому виконується лише під час перебирання результату.
-    public IEnumerable<Product> Filter(IEnumerable<Product> source, Func<Product, bool> predicate) =>
+    public static IEnumerable<Product> Filter(IEnumerable<Product> source, Func<Product, bool> predicate) =>
         source.Where(predicate);
 
     // Єдине місце, де піднімається подія. Викликається лише ПІСЛЯ успішної зміни.

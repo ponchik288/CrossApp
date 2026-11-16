@@ -16,7 +16,7 @@ internal static class DataCommands
     // Експорт усієї колекції в JSON. Без аргументу — у файл даних із конфігурації.
     public static int Export(CliSettings settings, CatalogService service, string[] args, bool storeIsFile)
     {
-        string? target = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+        string? target = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
 
         // Якщо сховище і так працює з файлом даних, експортуємо поруч, щоб не писати файл у самого себе.
         string path = target is not null
@@ -38,7 +38,7 @@ internal static class DataCommands
     // add <sku> <назва> <кількість> [одиниця] — одиниця за замовчуванням береться з Warehouse:DefaultUnit.
     public static int Add(CliSettings settings, CatalogService service, string[] args)
     {
-        string[] values = args.Skip(1).Where(a => !a.StartsWith("--")).ToArray();
+        string[] values = args.Skip(1).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
 
         if (values.Length < 3 || !int.TryParse(values[2], out int quantity))
         {

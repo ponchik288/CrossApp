@@ -16,7 +16,7 @@ public class ImportTests
         var service = new CatalogService(new InMemoryCatalogStore());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => service.ImportAsync(new JsonCatalogImporter(), "any.json", cts.Token));
+            () => service.ImportAsync(new JsonCatalogImporter(), "any.json", ct: cts.Token));
     }
 
     // 6) зіпсований запис у тимчасовому файлі -> DomainException з номером запису
@@ -73,7 +73,7 @@ public class ImportTests
         var slowImporter = new FakeImporter(TestData.Items(), delay: TimeSpan.FromSeconds(30));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => service.ImportAsync(slowImporter, "не використовується", linked.Token));
+            () => service.ImportAsync(slowImporter, "не використовується", ct: linked.Token));
 
         Assert.True(timeoutCts.IsCancellationRequested);
         Assert.False(userCts.IsCancellationRequested);
@@ -86,7 +86,7 @@ public class ImportTests
         var service = new CatalogService(new InMemoryCatalogStore());
         var progress = new ListProgress();
 
-        await service.ImportAsync(new FakeImporter(TestData.Items()), "не використовується", progress: progress);
+        await service.ImportAsync(new FakeImporter(TestData.Items()), "не використовується", progress);
 
         Assert.Equal(new[] { 20, 40, 60, 80, 100 }, progress.Values);
     }

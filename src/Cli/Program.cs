@@ -43,7 +43,7 @@ INotificationSink? sink =
 var service = new CatalogService(store, sink);
 
 // Команда — перший аргумент без "--". Без команди запускається сценарій каталогу.
-string command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "catalog";
+string command = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? "catalog";
 
 try
 {
@@ -57,7 +57,7 @@ try
         "config" => DataCommands.Config(settings),
         "export" => DataCommands.Export(settings, service, args, useFile),
         "add" => DataCommands.Add(settings, service, args),
-        _ when command.StartsWith("report") => ReportCommand.Run(command, service),
+        _ when command.StartsWith("report", StringComparison.Ordinal) => ReportCommand.Run(command, service),
         "import" => ImportCommand.Run(args.Skip(1).ToArray()),
         "demo" => DomainDemo.Run(),
         "env" => EnvironmentPrinter.Print(args.Contains("--json")),

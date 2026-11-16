@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using Api.Endpoints;
 using Api.Errors;
+using Api.Logging;
 using Api.Validation;
 using Contracts;
 using Core.Abstractions;
@@ -29,8 +30,7 @@ builder.Services.AddScoped<CatalogService>(provider =>
     ILogger logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("Catalog");
 
     // Той самий механізм подій, що й у Cli (ЛР6): тут підписник — логер Api.
-    service.Changed += (_, e) =>
-        logger.LogInformation("{Kind} {Id}: {Delta:+0;-0} -> залишок {QuantityAfter}", e.Kind, e.Id, e.Delta, e.QuantityAfter);
+    service.Changed += (_, e) => CatalogLog.CatalogChanged(logger, e.Kind, e.Id, e.Delta, e.QuantityAfter);
 
     return service;
 });

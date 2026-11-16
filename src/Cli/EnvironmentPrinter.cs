@@ -10,6 +10,11 @@ internal static class EnvironmentPrinter
 {
     private const string Domain = "Склад (товари, партії, залишки, переміщення)";
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+    };
+
     public static int Print(bool jsonMode)
     {
         EnvironmentReport report = EnvironmentInfo.Collect();
@@ -39,12 +44,7 @@ internal static class EnvironmentPrinter
             report.BuildNote
         };
 
-        var options = new JsonSerializerOptions
-        {
-            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
-        };
-
-        Console.WriteLine(JsonSerializer.Serialize(info, options));
+        Console.WriteLine(JsonSerializer.Serialize(info, JsonOptions));
     }
 
     private static void PrintText(EnvironmentReport report)

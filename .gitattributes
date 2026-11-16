@@ -1,0 +1,4 @@
+# Кінці рядків однакові на всіх ОС (узгоджено з end_of_line = lf в .editorconfig).
+* text=auto eol=lf
+*.png binary
+*.ico binary

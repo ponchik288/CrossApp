@@ -1,0 +1,37 @@
+# Єдиний стиль коду для всього репозиторію. Читають Visual Studio, VS Code, dotnet format і CI.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,csproj,props,http}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+csharp_new_line_before_open_brace = all
+csharp_style_namespace_declarations = file_scoped:suggestion
+dotnet_sort_system_directives_first = true
+
+# клас із полем IDisposable сам має бути IDisposable
+dotnet_diagnostic.CA1001.severity = warning
+# зайві using
+dotnet_diagnostic.IDE0005.severity = warning
+
+# Згенерований код (міграції EF Core) не форматуємо і не аналізуємо.
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
+
+# У назвах тестів підкреслення розділяє «метод_умова_результат».
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+# масив-літерал прямо в Assert.Equal читається краще, ніж винесене поле
+dotnet_diagnostic.CA1861.severity = none

@@ -58,7 +58,7 @@ internal sealed class CliSettings
 
     // У конфігурацію передаємо лише аргументи виду --Розділ:Ключ=значення; решта — команди і прапорці Cli.
     private static string[] ConfigArguments(string[] args) =>
-        args.Where(a => a.StartsWith("--") && a.Contains(':') && a.Contains('=')).ToArray();
+        args.Where(a => a.StartsWith("--", StringComparison.Ordinal) && a.Contains(':') && a.Contains('=')).ToArray();
 
     public void PrintSummary()
     {
