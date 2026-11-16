@@ -5,7 +5,6 @@ using Core.Domain;
 using Core.Reports;
 using Core.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Api.Endpoints;
 
@@ -13,9 +12,9 @@ namespace Api.Endpoints;
 // бо він перевіряє правила і піднімає події (їх записує логер).
 public static class ProductEndpoints
 {
-    public static void MapProducts(this WebApplication app)
+    public static void MapProducts(this WebApplication app, string prefix, string tag)
     {
-        RouteGroupBuilder group = app.MapGroup("/api/products").WithTags("Products");
+        RouteGroupBuilder group = app.MapGroup(prefix).WithTags(tag);
 
         // GET /api/products?page=1&pageSize=20&search=цем&sortBy=quantity&desc=true
         group.MapGet("/", (ICatalogStore store, int page = 1, int pageSize = 50, string? search = null,
@@ -54,34 +53,34 @@ public static class ProductEndpoints
             TypedResults.Ok(ReportService.LowStock(store.List(), threshold)));
 
         // GET /api/products/{id}
-        group.MapGet("/{id}", Results<Ok<ProductDto>, NotFound> (string id, ICatalogStore store) =>
+        group.MapGet("/{id}", Results<Ok<ProductDto>, ProblemHttpResult> (string id, ICatalogStore store) =>
             store.GetById(id) is { } found
                 ? TypedResults.Ok(found.ToContract())
-                : TypedResults.NotFound());
+                : NotFound(id));
 
         // POST /api/products
-        group.MapPost("/", Results<Created<ProductDto>, Conflict<ProblemDetails>> (
+        group.MapPost("/", Results<Created<ProductDto>, ProblemHttpResult> (
             SaveProductRequest request, ICatalogStore store, CatalogService service) =>
         {
             if (FindBySku(store, request.Sku) is not null)
-                return TypedResults.Conflict(SkuTaken(request.Sku));
+                return SkuTaken(request.Sku);
 
             Product created = service.Add(request.Sku, request.Name, request.Unit, request.Quantity);
-            return TypedResults.Created($"/api/products/{created.Id}", created.ToContract());
+            return TypedResults.Created($"{prefix}/{created.Id}", created.ToContract());
         })
         .AddEndpointFilter<ValidationFilter<SaveProductRequest>>()
         .ProducesValidationProblem();
 
         // PUT /api/products/{id}
-        group.MapPut("/{id}", Results<Ok<ProductDto>, NotFound, Conflict<ProblemDetails>> (
+        group.MapPut("/{id}", Results<Ok<ProductDto>, ProblemHttpResult> (
             string id, SaveProductRequest request, ICatalogStore store, CatalogService service) =>
         {
             if (store.GetById(id) is null)
-                return TypedResults.NotFound();
+                return NotFound(id);
 
             // артикул має лишатися унікальним: інший товар з таким SKU — конфлікт
             if (FindBySku(store, request.Sku) is { } other && !other.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
-                return TypedResults.Conflict(SkuTaken(request.Sku));
+                return SkuTaken(request.Sku);
 
             Product replaced = service.Replace(id, request.Sku, request.Name, request.Unit, request.Quantity);
             return TypedResults.Ok(replaced.ToContract());
@@ -90,24 +89,24 @@ public static class ProductEndpoints
         .ProducesValidationProblem();
 
         // DELETE /api/products/{id}
-        group.MapDelete("/{id}", Results<NoContent, NotFound> (string id, CatalogService service) =>
+        group.MapDelete("/{id}", Results<NoContent, ProblemHttpResult> (string id, CatalogService service) =>
             service.Remove(id)
                 ? TypedResults.NoContent()
-                : TypedResults.NotFound());
+                : NotFound(id));
 
         // GET /api/products/{id}/batches — журнал надходжень товару
-        group.MapGet("/{id}/batches", Results<Ok<IReadOnlyList<BatchRecord>>, NotFound> (
+        group.MapGet("/{id}/batches", Results<Ok<IReadOnlyList<BatchRecord>>, ProblemHttpResult> (
             string id, ICatalogStore store, IBatchJournal journal) =>
             store.GetById(id) is null
-                ? TypedResults.NotFound()
+                ? NotFound(id)
                 : TypedResults.Ok(journal.ForProduct(id)));
 
         // POST /api/products/{id}/receive і /issue — прихід і видача
-        group.MapPost("/{id}/receive", Results<Ok<ProductDto>, NotFound> (
+        group.MapPost("/{id}/receive", Results<Ok<ProductDto>, ProblemHttpResult> (
             string id, ChangeQuantityRequest request, ICatalogStore store, CatalogService service, IBatchJournal journal) =>
         {
             if (store.GetById(id) is null)
-                return TypedResults.NotFound();
+                return NotFound(id);
 
             service.Receive(id, request.Quantity);
             journal.Record(id, request.Quantity);       // партія в таблиці Batches (зв'язок 1:N з Products)
@@ -116,28 +115,30 @@ public static class ProductEndpoints
         .AddEndpointFilter<ValidationFilter<ChangeQuantityRequest>>()
         .ProducesValidationProblem();
 
-        group.MapPost("/{id}/issue", Results<Ok<ProductDto>, NotFound> (
+        group.MapPost("/{id}/issue", Results<Ok<ProductDto>, ProblemHttpResult> (
             string id, ChangeQuantityRequest request, ICatalogStore store, CatalogService service) =>
         {
             if (store.GetById(id) is null)
-                return TypedResults.NotFound();
+                return NotFound(id);
 
             // Якщо залишку не вистачає, сервіс кине DomainException -> обробник винятків поверне 409.
             service.Issue(id, request.Quantity);
             return TypedResults.Ok(store.GetById(id)!.ToContract());
         })
         .AddEndpointFilter<ValidationFilter<ChangeQuantityRequest>>()
-        .ProducesValidationProblem()
-        .ProducesProblem(StatusCodes.Status409Conflict);
+        .ProducesValidationProblem();
     }
 
     private static Product? FindBySku(ICatalogStore store, string sku) =>
         store.List().FirstOrDefault(p => p.Sku.Equals(sku.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    private static ProblemDetails SkuTaken(string sku) => new()
-    {
-        Status = StatusCodes.Status409Conflict,
-        Title = "Порушено бізнес-правило.",
-        Detail = $"Товар з артикулом {sku.Trim().ToUpperInvariant()} уже існує."
-    };
+    private static ProblemHttpResult NotFound(string id) => TypedResults.Problem(
+        statusCode: StatusCodes.Status404NotFound,
+        title: "Товар не знайдено.",
+        detail: $"Товару з id {id} немає.");
+
+    private static ProblemHttpResult SkuTaken(string sku) => TypedResults.Problem(
+        statusCode: StatusCodes.Status409Conflict,
+        title: "Порушено бізнес-правило.",
+        detail: $"Товар з артикулом {sku.Trim().ToUpperInvariant()} уже існує.");
 }
