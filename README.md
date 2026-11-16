@@ -10,6 +10,29 @@
 
 Середовище: Windows 10 x64, .NET SDK 10.0.401.
 
+## Архітектура
+
+Залежності спрямовані всередину, до доменної моделі:
+
+```text
+Core            нічого з наших проєктів не використовує (і жодного NuGet-пакета)
+Infrastructure  -> Core                        (EF Core, SQLite, міграції)
+Contracts       нічого не використовує         (DTO HTTP-контракту)
+Api             -> Core, Infrastructure, Contracts
+Cli             -> Core
+Web             -> Contracts + лише HTTP-контракт Api
+Core.Tests      -> Core
+Api.Tests       -> Api
+```
+
+Інверсія залежностей: інтерфейс `ICatalogStore` оголошено в Core, його реалізацію `EfCatalogStore` –
+в Infrastructure, а з'єднує їх Api в DI-контейнері (`AddInfrastructure`). Тому заміна SQLite на іншу
+базу зачепить лише Infrastructure і конфігурацію.
+
+Перевірка фактичних посилань: `dotnet list src/Core/Core.csproj reference` і
+`dotnet list src/Core/Core.csproj package` – обидва списки порожні. Це ж перевіряє тест
+`ArchitectureTests`.
+
 ## Структура solution
 
 ```text
@@ -17,6 +40,9 @@ CrossApp/
   CrossApp.sln
   README.md
   .gitignore
+  .editorconfig              єдиний стиль коду (ЛР13)
+  .gitattributes             однакові кінці рядків на всіх ОС
+  Directory.Build.props      спільні налаштування проєктів і аналізатори
   data/                      зразкові вхідні файли (sample.csv, import.json тощо)
   src/
     Core/                    бібліотека класів (спільна логіка)
@@ -266,7 +292,7 @@ Trimmer видаляє код, на який немає прямих посил�
 
 | Сутність | Що робить |
 |---|---|
-| `Product` | товар із залишком: `Create`, `RegisterArrival`, `Issue`, `Rename`, `ToDto` / `FromDto` |
+| `Product` | товар із залишком: `Create`, `RegisterArrival`, `Issue`, `ToDto` / `FromDto` |
 | `Warehouse` | склад зі списком товарів: `Create`, `AddProduct`, `FindBySku`; список назовні лише для читання |
 | `Movement` | документ переміщення зі станом `Draft` / `Confirmed` / `Cancelled` |
 
@@ -281,10 +307,9 @@ Trimmer видаляє код, на який немає прямих посил�
 | 2 | Початковий залишок не від'ємний | `ArgumentOutOfRangeException` | `Product.Create` |
 | 3 | Кількість приходу і видачі більша за нуль | `ArgumentOutOfRangeException` | `Product.RegisterArrival`, `Product.Issue` |
 | 4 | Не можна видати більше, ніж є на залишку | `DomainException` | `Product.Issue` |
-| 5 | Нова назва товару не порожня | `ArgumentException` | `Product.Rename` |
-| 6 | На одному складі немає двох товарів з однаковим SKU | `DomainException` | `Warehouse.AddProduct` |
-| 7 | Переміщати можна лише той самий товар (однаковий SKU) | `DomainException` | `StockTransfer.Move` |
-| 8 | Підтверджене або скасоване переміщення змінити не можна | `DomainException` | `Movement.Confirm`, `Movement.Cancel` |
+| 5 | На одному складі немає двох товарів з однаковим SKU | `DomainException` | `Warehouse.AddProduct` |
+| 6 | Переміщати можна лише той самий товар (однаковий SKU) | `DomainException` | `StockTransfer.Move` |
+| 7 | Підтверджене або скасоване переміщення змінити не можна | `DomainException` | `Movement.Confirm`, `Movement.Cancel` |
 
 `Argument*` – некоректний сам аргумент; `DomainException` – аргумент нормальний, але операція
 порушує бізнес-правило в поточному стані (до ЛР8 тут був `InvalidOperationException`). `FromDto` викликає `Create`, тому дані з файлу проходять ті самі перевірки.
@@ -855,3 +880,70 @@ origin, якщо сервер їх явно не дозволив; це потр
    клієнт і сервер зв'язані спільною збіркою і мають оновлюватися разом; клієнту не на .NET це не допоможе.
 4. **Скасування запиту**: `Products.razor` тримає `CancellationTokenSource`; новий пошук або вихід зі
    сторінки (`Dispose`) скасовує попередній запит до Api.
+
+## ЛР13. Рефакторинг за шарами, контракти API, .editorconfig
+
+Нової функціональності майже немає: упорядковано структуру, формат помилок і стиль коду.
+Робота велася в гілці `refactor/lab13` малими комітами (налаштування → «format only» → контракти →
+мертвий код → тест архітектури) і злита в `main`.
+
+### Контракти API
+
+- Імена JSON – camelCase, задано явно (`PropertyNamingPolicy = JsonNamingPolicy.CamelCase`).
+- Усі помилки – у форматі ProblemDetails (RFC 9457), `Content-Type: application/problem+json`:
+
+```json
+// 400 – валідація
+{ "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "One or more validation errors occurred.", "status": 400,
+  "errors": { "Sku": ["Артикул обов'язковий."], "Quantity": ["Кількість не може бути від'ємною."] } }
+
+// 404 – ресурсу немає
+{ "type": "https://tools.ietf.org/html/rfc9110#section-15.5.5",
+  "title": "Товар не знайдено.", "status": 404, "detail": "Товару з id 0d14f078 немає." }
+
+// 409 – порушено бізнес-правило (DomainException або зайнятий артикул)
+{ "title": "Порушено бізнес-правило.", "status": 409, "detail": "Товар з артикулом A-100 уже існує." }
+```
+
+- 400 – некоректні дані запиту; 409 – дані коректні, але операція суперечить стану (артикул зайнятий,
+  не вистачає залишку). `DomainException` не протікає як 500: його перехоплює `DomainExceptionHandler`.
+- Stack trace у відповідях немає. Web читає `title`, `detail` і `errors` саме з цього формату.
+
+### Стиль і аналізатори
+
+- `.editorconfig` у корені: кодування, кінці рядків, відступи, file-scoped namespace, порядок `using`.
+- `Directory.Build.props`: `Nullable`, `ImplicitUsings`, `EnableNETAnalyzers`, `AnalysisLevel = latest-recommended`,
+  `TreatWarningsAsErrors` – один раз для всіх проєктів.
+
+```powershell
+dotnet format --verify-no-changes     # перевірка стилю, код повернення 0
+dotnet build -warnaserror             # 0 попереджень
+dotnet test                           # 55 тестів
+```
+
+### Що видалено
+
+| Що | Чому це було безпечно |
+|---|---|
+| `Product.Rename` | ніде не викликався: після ЛР10 дані товару замінює `CatalogService.Replace` |
+| `Warehouse.ToDto` / `Warehouse.FromDto` | жодного виклику; склади не зберігаються у файлі чи базі |
+| `Api/Contracts/*` | перенесено у спільний проєкт `src/Contracts` (ЛР12), дублікатів немає |
+
+Перед видаленням перевірено пошуком, що викликів немає; після – `dotnet build` і `dotnet test` зелені,
+кількість тестів не зменшилась (було 52, стало 55).
+
+### Технічний борг, що лишився
+
+1. `ICatalogStore` синхронний, тому запити до бази блокують потік (свідоме спрощення з ЛР5).
+2. Прихід товару і запис партії в журнал – два окремі `SaveChanges`, а не одна транзакція.
+3. Унікальність артикулу в Api перевіряється читанням усього списку; для великої бази потрібен окремий запит.
+
+### Додаткові завдання
+
+1. **Directory.Build.props** зі спільними `LangVersion`, `Nullable`, `TreatWarningsAsErrors`.
+2. **Тест-«вартовий» архітектури** `ArchitectureTests`: падає, якщо Core посилається на EF Core, ASP.NET
+   чи інші зовнішні збірки (перевірка `GetReferencedAssemblies` через рефлексію).
+3. **Версіонування маршрутів**: `/api/v1/products`. Стара адреса `/api/products` лишається псевдонімом v1.
+   Коли контракт зміниться несумісно, з'явиться `/api/v2/...`, а v1 працюватиме без змін, доки клієнти
+   не перейдуть; після цього v1 позначається застарілим і згодом видаляється.
