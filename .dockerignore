@@ -1,0 +1,19 @@
+# Що НЕ потрапляє в build context: артефакти збірки з Windows, історія Git, локальні бази.
+bin/
+obj/
+**/bin/
+**/obj/
+.git/
+.vs/
+.vscode/
+publish/
+docker-data/
+**/data/*.db
+*.db
+*.db-shm
+*.db-wal
+**/logs/
+.env
+Dockerfile
+**/Dockerfile
+docker-compose.yml
