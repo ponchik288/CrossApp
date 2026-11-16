@@ -48,6 +48,10 @@ public class ProductsApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         HttpResponseMessage response = await _client.GetAsync("/api/products/no-such-id");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        string body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"status\":404", body);
+        Assert.Contains("no-such-id", body);
     }
 
     [Fact]
@@ -104,5 +108,29 @@ public class ProductsApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal(22, after!.Quantity);
         Assert.Contains("\"amount\":5", batches);
         Assert.Contains("\"amount\":7", batches);
+    }
+
+    [Fact]
+    public async Task ValidationError_And_NotFound_UseTheSameProblemFormat()
+    {
+        HttpResponseMessage bad = await _client.PostAsJsonAsync("/api/v1/products", new SaveProductRequest("", "", "", -1));
+        HttpResponseMessage missing = await _client.GetAsync("/api/v1/products/no-such-id");
+
+        Assert.Equal("application/problem+json", bad.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("application/problem+json", missing.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task VersionedRoute_ReturnsTheSameData_AsUnversioned()
+    {
+        HttpResponseMessage created = await _client.PostAsJsonAsync(
+            "/api/v1/products", new SaveProductRequest("T-600", "Версіонований", "шт", 2));
+
+        Assert.StartsWith("/api/v1/products/", created.Headers.Location!.OriginalString);
+
+        ProductDto? product = await created.Content.ReadFromJsonAsync<ProductDto>();
+        ProductDto? viaOldRoute = await _client.GetFromJsonAsync<ProductDto>($"/api/products/{product!.Id}");
+
+        Assert.Equal(product, viaOldRoute);
     }
 }

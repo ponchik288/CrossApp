@@ -60,7 +60,7 @@ public class StorageTests
         using var file = new TempFile(".json", json);
         var service = new CatalogService(new InMemoryCatalogStore());
 
-        int added = await service.ImportStreamAsync(new JsonCatalogImporter().StreamAsync(file.Path));
+        int added = await service.ImportStreamAsync(JsonCatalogImporter.StreamAsync(file.Path));
 
         Assert.Equal(2, added);
     }

@@ -13,7 +13,7 @@ internal static class ImportAsyncCommand
     public static async Task<int> RunAsync(CatalogService service, string[] args)
     {
         // Шлях — перший аргумент після назви команди, інакше зразковий import.json поруч із застосунком.
-        string path = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--")) ?? CliSettings.Sample("import.json");
+        string path = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? CliSettings.Sample("import.json");
 
         // Два джерела скасування: користувач (Ctrl+C) і таймаут. Зв'язаний токен спрацьовує від будь-якого.
         using var userCts = new CancellationTokenSource();
@@ -41,12 +41,12 @@ internal static class ImportAsyncCommand
             int added;
             if (args.Contains("--stream"))
             {
-                added = await service.ImportStreamAsync(new JsonCatalogImporter().StreamAsync(path, linkedCts.Token), linkedCts.Token);
+                added = await service.ImportStreamAsync(JsonCatalogImporter.StreamAsync(path, linkedCts.Token), linkedCts.Token);
             }
             else
             {
                 IProgress<int>? progress = args.Contains("--progress") ? new ConsoleProgress() : null;
-                added = await service.ImportAsync(importer, path, linkedCts.Token, progress);
+                added = await service.ImportAsync(importer, path, progress, linkedCts.Token);
             }
 
             Console.WriteLine($"Імпортовано записів: {added}");
@@ -76,7 +76,7 @@ internal static class ImportAsyncCommand
 
     private static double? ReadSeconds(string[] args, string prefix)
     {
-        string? arg = args.FirstOrDefault(a => a.StartsWith(prefix));
+        string? arg = args.FirstOrDefault(a => a.StartsWith(prefix, StringComparison.Ordinal));
 
         return arg is not null &&
                double.TryParse(arg[prefix.Length..], NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds)

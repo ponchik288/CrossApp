@@ -9,7 +9,7 @@ public sealed class Product
 
     public string Id { get; }
     public string Sku { get; }
-    public string Name { get; private set; }
+    public string Name { get; }
     public string Unit { get; }
     public int Quantity => _quantity;
 
@@ -66,14 +66,6 @@ public sealed class Product
                 $"Не можна видати {amount}: залишок {Sku} = {_quantity}");
 
         _quantity -= amount;
-    }
-
-    public void Rename(string newName)
-    {
-        if (string.IsNullOrWhiteSpace(newName))
-            throw new ArgumentException("Назва не може бути порожньою", nameof(newName));
-
-        Name = newName.Trim();
     }
 
     // Мапінг у формат даних (DTO) і назад. FromDto проходить ті самі перевірки, що й Create.

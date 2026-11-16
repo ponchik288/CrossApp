@@ -1,5 +1,3 @@
-using Core.Dto;
-
 namespace Core.Domain;
 
 // Склад: містить товари. Список товарів назовні віддається лише для читання.
@@ -44,11 +42,7 @@ public sealed class Warehouse
     }
 
     public Product? FindBySku(string sku) =>
-        _products.Find(p => p.Sku == sku.Trim().ToUpperInvariant());
-
-    public WarehouseDto ToDto() => new(Id, Name, Address);
-
-    public static Warehouse FromDto(WarehouseDto dto) => Create(dto.Id, dto.Name, dto.Address);
+        _products.Find(p => string.Equals(p.Sku, sku.Trim(), StringComparison.OrdinalIgnoreCase));
 
     public override string ToString() => $"{Id} {Name} — товарів: {_products.Count}";
 }

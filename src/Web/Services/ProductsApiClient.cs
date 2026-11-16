@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Json;
 using Contracts;
 using Web.Contracts;
 
@@ -12,7 +11,7 @@ public sealed class ProductsApiClient(HttpClient http)
     public async Task<PagedResult<ProductDto>> ListAsync(
         string? search, string sortBy, bool desc, CancellationToken ct = default)
     {
-        string url = $"api/products?pageSize=100&sortBy={Uri.EscapeDataString(sortBy)}&desc={desc.ToString().ToLowerInvariant()}";
+        string url = $"api/v1/products?pageSize=100&sortBy={Uri.EscapeDataString(sortBy)}&desc={desc.ToString().ToLowerInvariant()}";
         if (!string.IsNullOrWhiteSpace(search))
             url += $"&search={Uri.EscapeDataString(search)}";
 
@@ -23,7 +22,7 @@ public sealed class ProductsApiClient(HttpClient http)
     // 404 — це не виняток, а відповідь «немає такого»: повертаємо null.
     public async Task<ProductModel?> FindAsync(string id, CancellationToken ct = default)
     {
-        using HttpResponseMessage response = await http.GetAsync($"api/products/{Uri.EscapeDataString(id)}", ct);
+        using HttpResponseMessage response = await http.GetAsync($"api/v1/products/{Uri.EscapeDataString(id)}", ct);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
             return null;
@@ -34,13 +33,13 @@ public sealed class ProductsApiClient(HttpClient http)
     }
 
     public Task<ApiResult> CreateAsync(ProductModel model, CancellationToken ct = default) =>
-        SendAsync(HttpMethod.Post, "api/products", model.ToRequest(), ct);
+        SendAsync(HttpMethod.Post, "api/v1/products", model.ToRequest(), ct);
 
     public Task<ApiResult> UpdateAsync(ProductModel model, CancellationToken ct = default) =>
-        SendAsync(HttpMethod.Put, $"api/products/{Uri.EscapeDataString(model.Id)}", model.ToRequest(), ct);
+        SendAsync(HttpMethod.Put, $"api/v1/products/{Uri.EscapeDataString(model.Id)}", model.ToRequest(), ct);
 
     public Task<ApiResult> DeleteAsync(string id, CancellationToken ct = default) =>
-        SendAsync(HttpMethod.Delete, $"api/products/{Uri.EscapeDataString(id)}", null, ct);
+        SendAsync(HttpMethod.Delete, $"api/v1/products/{Uri.EscapeDataString(id)}", null, ct);
 
     private async Task<ApiResult> SendAsync(HttpMethod method, string url, SaveProductRequest? body, CancellationToken ct)
     {
