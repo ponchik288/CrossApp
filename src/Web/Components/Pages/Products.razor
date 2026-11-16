@@ -1,0 +1,153 @@
+@page "/products"
+@implements IDisposable
+@inject ProductsApiClient Api
+@inject IConfiguration Configuration
+
+<PageTitle>Товари</PageTitle>
+
+<h1>Товари</h1>
+
+<div class="row g-2 align-items-end mb-3">
+    <div class="col-md-4">
+        <label class="form-label" for="search">Пошук за назвою або артикулом</label>
+        <input id="search" class="form-control" @bind="search" @bind:after="LoadAsync" placeholder="наприклад, цемент" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label" for="sort">Сортування</label>
+        <select id="sort" class="form-select" @bind="sort" @bind:after="LoadAsync">
+            <option value="sku">за артикулом</option>
+            <option value="name">за назвою</option>
+            <option value="quantity">за кількістю (зростання)</option>
+            <option value="quantity-desc">за кількістю (спадання)</option>
+        </select>
+    </div>
+    <div class="col-md-auto">
+        <a class="btn btn-primary" href="products/new">Додати</a>
+    </div>
+</div>
+
+@if (notice is not null)
+{
+    <div class="alert alert-info" role="status">@notice</div>
+}
+
+@if (error is not null)
+{
+    <div class="alert alert-danger" role="alert">@error</div>
+}
+else if (items is null)
+{
+    <p><em>Завантаження…</em></p>
+}
+else if (items.Count == 0)
+{
+    <p>Записів ще немає.</p>
+}
+else
+{
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr><th>Артикул</th><th>Назва</th><th class="text-end">К-сть</th><th>Од.</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (ProductDto item in items)
+            {
+                @* товари нижче межі підсвічуємо *@
+                <tr class="@(item.Quantity < lowStockThreshold ? "table-warning" : null)">
+                    <td>@item.Sku</td>
+                    <td>@item.Name</td>
+                    <td class="text-end">@item.Quantity</td>
+                    <td>@item.Unit</td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-primary" href="@($"products/{item.Id}")">Редагувати</a>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => AskDelete(item)">Видалити</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <p class="text-muted">Знайдено: @total. Жовтим позначено товари із залишком менше @lowStockThreshold.</p>
+}
+
+@if (pendingDelete is not null)
+{
+    <div class="alert alert-warning" role="alertdialog">
+        <p>Видалити товар <strong>@pendingDelete.Sku — @pendingDelete.Name</strong>? Цю дію не можна скасувати.</p>
+        <button class="btn btn-danger" @onclick="ConfirmDeleteAsync">Так, видалити</button>
+        <button class="btn btn-secondary" @onclick="() => pendingDelete = null">Скасувати</button>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<ProductDto>? items;
+    private int total;
+    private string? error;
+    private string? notice;
+    private string? search;
+    private string sort = "sku";
+    private int lowStockThreshold;
+    private ProductDto? pendingDelete;
+
+    // Скасування запиту, якщо користувач пішов зі сторінки або запустив новий пошук, не дочекавшись відповіді.
+    private CancellationTokenSource? cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        lowStockThreshold = Configuration.GetValue("Warehouse:LowStockThreshold", 10);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+        cts = new CancellationTokenSource();
+
+        try
+        {
+            bool desc = sort.EndsWith("-desc");
+            string sortBy = desc ? sort[..^5] : sort;
+
+            PagedResult<ProductDto> page = await Api.ListAsync(search, sortBy, desc, cts.Token);
+            items = page.Items;
+            total = page.Total;
+            error = null;
+        }
+        catch (OperationCanceledException)
+        {
+            // запит скасовано — нічого не показуємо
+        }
+        catch (HttpRequestException)
+        {
+            items = null;
+            error = "Api недоступний. Перевірте, чи запущено src/Api.";
+        }
+    }
+
+    private void AskDelete(ProductDto item)
+    {
+        notice = null;
+        pendingDelete = item;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (pendingDelete is null)
+            return;
+
+        ProductDto target = pendingDelete;
+        pendingDelete = null;
+
+        ApiResult result = await Api.DeleteAsync(target.Id);
+        notice = result.Ok ? $"Товар {target.Sku} видалено." : result.Message;
+
+        await LoadAsync();      // список оновлюється без перезавантаження сторінки
+    }
+
+    public void Dispose()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+}

@@ -39,9 +39,14 @@ CrossApp/
       EfCatalogStore.cs      реалізація ICatalogStore на EF Core
       EfBatchJournal.cs      журнал надходжень (таблиця Batches)
       Migrations/            міграції (у Git)
+    Contracts/               DTO контракту API, спільні для Api і Web (ЛР12)
+    Web/                     Blazor-клієнт до Api (Interactive Server, ЛР12)
+      Program.cs             типізований HttpClient з адресою з конфігурації
+      Services/              ProductsApiClient – усі виклики Api
+      Contracts/             модель форми і результат виклику
+      Components/Pages/      Products.razor, ProductEdit.razor
     Api/                     HTTP API (Minimal API, ЛР10)
-      Program.cs             DI, обробка помилок, OpenAPI/Scalar
-      Contracts/             DTO запитів і відповідей
+      Program.cs             DI, CORS, обробка помилок, OpenAPI/Scalar
       Endpoints/             маршрути /api/products
       Validation/            правила FluentValidation і фільтр маршруту
       Errors/                перетворення винятків на ProblemDetails
@@ -69,8 +74,9 @@ CrossApp/
     Show-CoreTargets.ps1     показує Core, зібраний під net8.0 і net10.0
 ```
 
-Залежності односторонні: `Cli → Core`, `Infrastructure → Core`, `Api → Core + Infrastructure`.
-Core не знає ні про консоль, ні про HTTP, ні про базу даних.
+Залежності односторонні: `Cli → Core`, `Infrastructure → Core`, `Api → Core + Infrastructure + Contracts`,
+`Web → Contracts`. Core не знає ні про консоль, ні про HTTP, ні про базу даних; Web не знає ні про Core,
+ні про базу – лише адресу Api і формат JSON.
 
 Домовленість про каталоги в Core на семестр (створюються разом із першим типом):
 
@@ -94,6 +100,7 @@ dotnet run --project src/Cli -- config                   # показати ді
 dotnet run --project src/Cli -- export                   # експорт колекції в JSON
 dotnet test                                              # unit-тести та інтеграційні тести
 dotnet run --project src/Api                             # HTTP API на http://localhost:5080
+dotnet run --project src/Web                             # Blazor-клієнт на http://localhost:5090 (Api має бути запущений)
 dotnet run --project src/Cli -- data/sample.csv          # імпорт CSV
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
 dotnet run --project src/Cli -- data/mixed.csv --mixed   # товари і склади в одному файлі
@@ -784,3 +791,67 @@ GET /api/products?search=P-220511                -> запис на місці, 
 `DbContext`, `EfCatalogStore` і `CatalogService` мають життєвий цикл Scoped: окремий екземпляр на кожен HTTP-запит.
 Інтеграційні тести (`tests/Api.Tests`) працюють із тимчасовим файлом SQLite і перевіряють, зокрема,
 що дані переживають перезапуск Api.
+
+## ЛР12. Blazor-клієнт до власного API
+
+`src/Web` – браузерний інтерфейс до того самого Api. Web не посилається на Infrastructure і не має
+рядка підключення до бази: він знає лише базову адресу Api, маршрути та формат JSON.
+
+### Режим Blazor
+
+Обрано **Blazor Web App, Interactive Server** (`dotnet new blazor --interactivity Server --all-interactive`).
+C#-код компонентів виконується **на сервері Web**; браузер отримує готовий HTML і далі обмінюється
+подіями та оновленнями інтерфейсу через з'єднання SignalR. Запити до Api робить сервер Web
+(server-to-server), а не браузер. Режим задано глобально в `Components/App.razor`
+(`<Routes @rendermode="InteractiveServer" />`).
+
+### Запуск: два процеси
+
+```powershell
+# термінал 1
+dotnet run --project src/Api          # http://localhost:5080
+# термінал 2
+dotnet run --project src/Web          # http://localhost:5090  ->  відкрити /products
+```
+
+### Конфігурація
+
+| Де | Ключ | Значення | Змінна середовища |
+|---|---|---|---|
+| `src/Web/appsettings.json` | `Api:BaseUrl` | `http://localhost:5080` | `Api__BaseUrl` |
+| `src/Web/appsettings.json` | `Warehouse:LowStockThreshold` | `10` – межа підсвітки рядків | `Warehouse__LowStockThreshold` |
+| `src/Api/appsettings.json` | `Cors:WebOrigin` | `http://localhost:5090` | `Cors__WebOrigin` |
+
+У `.razor` і `.cs` файлах Web немає жодної адреси: `ProductsApiClient` зареєстровано через
+`AddHttpClient<ProductsApiClient>` з `BaseAddress` із конфігурації.
+
+**CORS.** Api дозволяє запити з origin Web (`Cors:WebOrigin`). Браузер блокує запити сторінки до іншого
+origin, якщо сервер їх явно не дозволив; це потрібно клієнту, який працює в браузері (Blazor WebAssembly).
+Для Interactive Server ця політика не потрібна, бо до Api звертається сервер Web, а не браузер;
+вона додана, щоб те саме Api підходило і для WASM-клієнта.
+
+### Сторінки
+
+| Сторінка | Маршрут UI | Виклик Api | Коди відповіді |
+|---|---|---|---|
+| Список товарів | `/products` | `GET /api/products?search=&sortBy=&desc=` | 200 |
+| Видалення (у списку) | `/products` | `DELETE /api/products/{id}` | 204, 404 |
+| Новий товар | `/products/new` | `POST /api/products` | 201, 400, 409 |
+| Редагування | `/products/{id}` | `GET /api/products/{id}`, потім `PUT /api/products/{id}` | 200, 400, 404, 409 |
+
+Список показує стан завантаження, текст «Записів ще немає.» для порожньої колекції і підсвічує товари
+із залишком нижче межі. Форма перевіряє поля локально (Data Annotations), а помилки 400 від сервера
+показує біля відповідних полів; 409 – загальним повідомленням. Якщо Api зупинено, сторінка показує
+«Api недоступний. Перевірте, чи запущено src/Api.», а не падає.
+
+### Додаткові завдання
+
+1. **Видалення з підтвердженням**: кнопка «Видалити» показує запит на підтвердження; після видалення
+   список перезавантажується з Api без повного перезавантаження сторінки.
+2. **Пошук і сортування на боці Api**: `GET /api/products?search=...&sortBy=sku|name|quantity&desc=true`;
+   UI лише передає параметри, нічого не фільтрує сам.
+3. **Спільний проєкт `src/Contracts`** з DTO для Api і Web. Плюс: контракт описано один раз, розбіжність
+   назв полів між сервером і клієнтом неможлива, зміну контракту одразу показує компілятор. Мінус:
+   клієнт і сервер зв'язані спільною збіркою і мають оновлюватися разом; клієнту не на .NET це не допоможе.
+4. **Скасування запиту**: `Products.razor` тримає `CancellationTokenSource`; новий пошук або вихід зі
+   сторінки (`Dispose`) скасовує попередній запит до Api.

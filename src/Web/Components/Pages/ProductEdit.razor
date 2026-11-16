@@ -1,0 +1,148 @@
+@page "/products/new"
+@page "/products/{Id}"
+@inject ProductsApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>@Title</PageTitle>
+
+<h1>@Title</h1>
+
+@if (notFound)
+{
+    <div class="alert alert-warning" role="alert">Товар з таким ідентифікатором не знайдено.</div>
+    <a href="products">До списку</a>
+}
+else if (loadError is not null)
+{
+    <div class="alert alert-danger" role="alert">@loadError</div>
+    <a href="products">До списку</a>
+}
+else if (model is null || editContext is null)
+{
+    <p><em>Завантаження…</em></p>
+}
+else
+{
+    <EditForm EditContext="editContext" OnValidSubmit="SaveAsync" FormName="product" style="max-width: 32rem">
+        <DataAnnotationsValidator />
+
+        @if (message is not null)
+        {
+            <div class="alert alert-danger" role="alert">@message</div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label" for="sku">Артикул</label>
+            <InputText id="sku" class="form-control" @bind-Value="model.Sku" />
+            <ValidationMessage For="() => model.Sku" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="name">Назва</label>
+            <InputText id="name" class="form-control" @bind-Value="model.Name" />
+            <ValidationMessage For="() => model.Name" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="unit">Одиниця виміру</label>
+            <InputText id="unit" class="form-control" @bind-Value="model.Unit" />
+            <ValidationMessage For="() => model.Unit" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="quantity">Кількість</label>
+            <InputNumber id="quantity" class="form-control" @bind-Value="model.Quantity" />
+            <ValidationMessage For="() => model.Quantity" />
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@saving">Зберегти</button>
+        <a class="btn btn-secondary" href="products">Скасувати</a>
+    </EditForm>
+}
+
+@code {
+    // Без Id у маршруті — створення, з Id — редагування.
+    [Parameter] public string? Id { get; set; }
+
+    private ProductModel? model;
+    private EditContext? editContext;
+    private ValidationMessageStore? serverErrors;
+    private string? message;
+    private string? loadError;
+    private bool notFound;
+    private bool saving;
+
+    private bool IsNew => string.IsNullOrEmpty(Id);
+    private string Title => IsNew ? "Новий товар" : "Редагування товару";
+
+    // OnParametersSetAsync, а не OnInitializedAsync: Id — параметр маршруту, і він може змінитися без створення нового компонента.
+    protected override async Task OnParametersSetAsync()
+    {
+        notFound = false;
+        loadError = null;
+        message = null;
+
+        if (IsNew)
+        {
+            Bind(new ProductModel());
+            return;
+        }
+
+        try
+        {
+            ProductModel? found = await Api.FindAsync(Id!);
+            if (found is null)
+                notFound = true;
+            else
+                Bind(found);
+        }
+        catch (HttpRequestException)
+        {
+            loadError = "Api недоступний. Перевірте, чи запущено src/Api.";
+        }
+    }
+
+    private void Bind(ProductModel value)
+    {
+        model = value;
+        editContext = new EditContext(model);
+        serverErrors = new ValidationMessageStore(editContext);
+
+        // щойно користувач змінив поле, стара серверна помилка для нього більше не актуальна
+        editContext.OnFieldChanged += (_, e) =>
+        {
+            serverErrors.Clear(e.FieldIdentifier);
+            editContext.NotifyValidationStateChanged();
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (model is null || editContext is null || serverErrors is null)
+            return;
+
+        saving = true;
+        message = null;
+        serverErrors.Clear();
+
+        ApiResult result = IsNew ? await Api.CreateAsync(model) : await Api.UpdateAsync(model);
+        saving = false;
+
+        if (result.Ok)
+        {
+            Navigation.NavigateTo("products");
+            return;
+        }
+
+        message = result.Message;
+
+        // Помилки 400 від сервера розкладаємо по полях: ключ словника — назва властивості моделі.
+        if (result.Errors is not null)
+        {
+            foreach ((string field, string[] errors) in result.Errors)
+                serverErrors.Add(editContext.Field(field), errors);
+        }
+
+        editContext.NotifyValidationStateChanged();
+    }
+}

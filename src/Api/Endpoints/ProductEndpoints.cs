@@ -1,5 +1,5 @@
-using Api.Contracts;
 using Api.Validation;
+using Contracts;
 using Core.Abstractions;
 using Core.Domain;
 using Core.Reports;
@@ -17,8 +17,9 @@ public static class ProductEndpoints
     {
         RouteGroupBuilder group = app.MapGroup("/api/products").WithTags("Products");
 
-        // GET /api/products?page=1&pageSize=20&search=цем
-        group.MapGet("/", (ICatalogStore store, int page = 1, int pageSize = 50, string? search = null) =>
+        // GET /api/products?page=1&pageSize=20&search=цем&sortBy=quantity&desc=true
+        group.MapGet("/", (ICatalogStore store, int page = 1, int pageSize = 50, string? search = null,
+            string sortBy = "sku", bool desc = false) =>
         {
             page = Math.Max(page, 1);
             pageSize = Math.Clamp(pageSize, 1, 100);
@@ -31,8 +32,19 @@ public static class ProductEndpoints
                     p.Sku.Contains(search, StringComparison.OrdinalIgnoreCase));
             }
 
-            List<Product> found = query.OrderBy(p => p.Sku, StringComparer.Ordinal).ToList();
-            List<ProductDto> items = found.Skip((page - 1) * pageSize).Take(pageSize).Select(ProductDto.From).ToList();
+            // Сортування на боці сервера; другий ключ (SKU) робить порядок однозначним.
+            IOrderedEnumerable<Product> ordered = (sortBy.ToLowerInvariant(), desc) switch
+            {
+                ("name", false) => query.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
+                ("name", true) => query.OrderByDescending(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
+                ("quantity", false) => query.OrderBy(p => p.Quantity),
+                ("quantity", true) => query.OrderByDescending(p => p.Quantity),
+                (_, true) => query.OrderByDescending(p => p.Sku, StringComparer.Ordinal),
+                _ => query.OrderBy(p => p.Sku, StringComparer.Ordinal)
+            };
+
+            List<Product> found = ordered.ThenBy(p => p.Sku, StringComparer.Ordinal).ToList();
+            List<ProductDto> items = found.Skip((page - 1) * pageSize).Take(pageSize).Select(p => p.ToContract()).ToList();
 
             return TypedResults.Ok(new PagedResult<ProductDto>(items, found.Count, page, pageSize));
         });
@@ -44,7 +56,7 @@ public static class ProductEndpoints
         // GET /api/products/{id}
         group.MapGet("/{id}", Results<Ok<ProductDto>, NotFound> (string id, ICatalogStore store) =>
             store.GetById(id) is { } found
-                ? TypedResults.Ok(ProductDto.From(found))
+                ? TypedResults.Ok(found.ToContract())
                 : TypedResults.NotFound());
 
         // POST /api/products
@@ -55,7 +67,7 @@ public static class ProductEndpoints
                 return TypedResults.Conflict(SkuTaken(request.Sku));
 
             Product created = service.Add(request.Sku, request.Name, request.Unit, request.Quantity);
-            return TypedResults.Created($"/api/products/{created.Id}", ProductDto.From(created));
+            return TypedResults.Created($"/api/products/{created.Id}", created.ToContract());
         })
         .AddEndpointFilter<ValidationFilter<SaveProductRequest>>()
         .ProducesValidationProblem();
@@ -72,7 +84,7 @@ public static class ProductEndpoints
                 return TypedResults.Conflict(SkuTaken(request.Sku));
 
             Product replaced = service.Replace(id, request.Sku, request.Name, request.Unit, request.Quantity);
-            return TypedResults.Ok(ProductDto.From(replaced));
+            return TypedResults.Ok(replaced.ToContract());
         })
         .AddEndpointFilter<ValidationFilter<SaveProductRequest>>()
         .ProducesValidationProblem();
@@ -99,7 +111,7 @@ public static class ProductEndpoints
 
             service.Receive(id, request.Quantity);
             journal.Record(id, request.Quantity);       // партія в таблиці Batches (зв'язок 1:N з Products)
-            return TypedResults.Ok(ProductDto.From(store.GetById(id)!));
+            return TypedResults.Ok(store.GetById(id)!.ToContract());
         })
         .AddEndpointFilter<ValidationFilter<ChangeQuantityRequest>>()
         .ProducesValidationProblem();
@@ -112,7 +124,7 @@ public static class ProductEndpoints
 
             // Якщо залишку не вистачає, сервіс кине DomainException -> обробник винятків поверне 409.
             service.Issue(id, request.Quantity);
-            return TypedResults.Ok(ProductDto.From(store.GetById(id)!));
+            return TypedResults.Ok(store.GetById(id)!.ToContract());
         })
         .AddEndpointFilter<ValidationFilter<ChangeQuantityRequest>>()
         .ProducesValidationProblem()

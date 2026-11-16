@@ -1,4 +1,4 @@
-using Api.Contracts;
+using Contracts;
 using FluentValidation;
 
 namespace Api.Validation;
@@ -10,7 +10,9 @@ public sealed class SaveProductRequestValidator : AbstractValidator<SaveProductR
     {
         RuleFor(r => r.Sku)
             .NotEmpty().WithMessage("Артикул обов'язковий.")
-            .MaximumLength(50).WithMessage("Артикул: до 50 символів.");
+            .MaximumLength(50).WithMessage("Артикул: до 50 символів.")
+            // Це правило є лише на сервері: клієнтська перевірка зручна, але остаточне слово — за Api.
+            .Matches(@"^[\p{L}\p{Nd}-]*$").WithMessage("Артикул: лише літери, цифри і дефіс.");
 
         RuleFor(r => r.Name)
             .NotEmpty().WithMessage("Назва обов'язкова.")

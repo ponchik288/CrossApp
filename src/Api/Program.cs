@@ -1,8 +1,8 @@
 using System.Text.Encodings.Web;
-using Api.Contracts;
 using Api.Endpoints;
 using Api.Errors;
 using Api.Validation;
+using Contracts;
 using Core.Abstractions;
 using Core.Services;
 using FluentValidation;
@@ -35,6 +35,12 @@ builder.Services.AddScoped<CatalogService>(provider =>
     return service;
 });
 
+// CORS: дозволяє браузерному клієнту з іншого origin (наприклад, Blazor WebAssembly) викликати Api.
+// Для Blazor Interactive Server не потрібна: там запит до Api робить сервер Web, а не браузер.
+string webOrigin = builder.Configuration["Cors:WebOrigin"] ?? "http://localhost:5090";
+builder.Services.AddCors(options => options.AddPolicy("web", policy =>
+    policy.WithOrigins(webOrigin).AllowAnyHeader().AllowAnyMethod()));
+
 builder.Services.AddScoped<IValidator<SaveProductRequest>, SaveProductRequestValidator>();
 builder.Services.AddScoped<IValidator<ChangeQuantityRequest>, ChangeQuantityRequestValidator>();
 
@@ -52,6 +58,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();               // документ: /openapi/v1.json
     app.MapScalarApiReference();    // UI: /scalar/v1
 }
+
+app.UseCors("web");             // обов'язково до маршрутів
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapProducts();
