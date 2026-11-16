@@ -32,17 +32,21 @@ CrossApp/
       Events/                дані події зміни каталогу (ЛР6)
       Reports/               LINQ-звіти і їхні DTO (ЛР7)
       SampleData.cs          зразкові дані (18 товарів)
+      DomainException.cs     виняток бізнес-правил (ЛР8)
     Cli/                     консольний застосунок
       Cli.csproj             містить ProjectReference на Core
       Program.cs             composition root і вибір команди
       CatalogCommand.cs      сценарій роботи з каталогом
       EventsCommand.cs       підписка на події, лог у файл
       ReportCommand.cs       підкоманди звітів
+      ImportAsyncCommand.cs  асинхронний імпорт зі скасуванням
       Sinks.cs               одержувачі сповіщень (консоль, файл)
       StoreFactory.cs        вибір сховища через фабрику
       ImportCommand.cs       імпорт із файлу і вивід результату
       DomainDemo.cs          демонстрація доменної моделі
       EnvironmentPrinter.cs  вивід інформації про середовище
+  tests/
+    Core.Tests/              unit-тести Core (xUnit), посилання лише на Core
   scripts/
     Show-CoreTargets.ps1     показує Core, зібраний під net8.0 і net10.0
 ```
@@ -66,6 +70,8 @@ dotnet run --project src/Cli                             # каталог, сх�
 dotnet run --project src/Cli -- --file                   # каталог, файлове сховище
 dotnet run --project src/Cli -- events                   # події сервісу і лог logs/app.log
 dotnet run --project src/Cli -- report-top               # звіти: report-low, report-groups, report-sum
+dotnet run --project src/Cli -- import-async             # асинхронний імпорт data/import.json
+dotnet test                                              # unit-тести
 dotnet run --project src/Cli -- data/sample.csv          # імпорт CSV
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
 dotnet run --project src/Cli -- data/mixed.csv --mixed   # товари і склади в одному файлі
@@ -245,14 +251,14 @@ Trimmer видаляє код, на який немає прямих посил�
 | 1 | Id, SKU, назва й одиниця виміру товару не порожні | `ArgumentException` | `Product.Create` |
 | 2 | Початковий залишок не від'ємний | `ArgumentOutOfRangeException` | `Product.Create` |
 | 3 | Кількість приходу і видачі більша за нуль | `ArgumentOutOfRangeException` | `Product.RegisterArrival`, `Product.Issue` |
-| 4 | Не можна видати більше, ніж є на залишку | `InvalidOperationException` | `Product.Issue` |
+| 4 | Не можна видати більше, ніж є на залишку | `DomainException` | `Product.Issue` |
 | 5 | Нова назва товару не порожня | `ArgumentException` | `Product.Rename` |
-| 6 | На одному складі немає двох товарів з однаковим SKU | `InvalidOperationException` | `Warehouse.AddProduct` |
-| 7 | Переміщати можна лише той самий товар (однаковий SKU) | `InvalidOperationException` | `StockTransfer.Move` |
-| 8 | Підтверджене або скасоване переміщення змінити не можна | `InvalidOperationException` | `Movement.Confirm`, `Movement.Cancel` |
+| 6 | На одному складі немає двох товарів з однаковим SKU | `DomainException` | `Warehouse.AddProduct` |
+| 7 | Переміщати можна лише той самий товар (однаковий SKU) | `DomainException` | `StockTransfer.Move` |
+| 8 | Підтверджене або скасоване переміщення змінити не можна | `DomainException` | `Movement.Confirm`, `Movement.Cancel` |
 
-`Argument*` – некоректний сам аргумент; `InvalidOperation` – аргумент нормальний, але операція
-неможлива в поточному стані. `FromDto` викликає `Create`, тому дані з файлу проходять ті самі перевірки.
+`Argument*` – некоректний сам аргумент; `DomainException` – аргумент нормальний, але операція
+порушує бізнес-правило в поточному стані (до ЛР8 тут був `InvalidOperationException`). `FromDto` викликає `Create`, тому дані з файлу проходять ті самі перевірки.
 У `Core/Domain` немає звернень ні до `Console`, ні до `File`.
 
 ### Запуск
@@ -268,7 +274,7 @@ P-001 [SKU-001] Цемент М400 25кг — 120 шт
 W-01 Головний склад — товарів: 1
 
 === Сценарій 2: порушення інваріантів ===
-  видача більша за залишок: InvalidOperationException — Не можна видати 1000: залишок SKU-001 = 120
+  видача більша за залишок: DomainException — Не можна видати 1000: залишок SKU-001 = 120
   порожній SKU: ArgumentException — SKU не може бути порожнім (Parameter 'sku')
   від'ємний залишок: ArgumentOutOfRangeException — Початковий залишок не може бути від'ємним (Parameter 'quantity') Actual value was -5.
   ...
@@ -449,3 +455,73 @@ dotnet run --project src/Cli -- report-low --empty
    без проміжних `ToList` – близько 32 мс, з `ToList` після кожного кроку – близько 28 мс.
    Різниця мала: зайві списки не прискорюють запит суттєво, зате кожен `ToList` створює ще одну
    копію даних у пам'яті.
+
+## ЛР8. async/await, скасування, доменні винятки, unit-тести
+
+### Асинхронний імпорт
+
+Асинхронним став імпорт товарів із файлу – це ввід-вивід, який може тривати довго. Операції над
+сховищем у пам'яті (`Add`, `Receive`, `Issue`) і звіти залишилися синхронними: там немає очікування.
+
+- `Core/Abstractions/ICatalogImporter.cs` – контракт `Task<IReadOnlyList<Product>> LoadAsync(path, ct)`.
+- `Core/Storage/JsonCatalogImporter.cs` – `FileStream(useAsync: true)` + `JsonSerializer.DeserializeAsync`,
+  без `Task.Run`. Токен перевіряється в циклі (`ThrowIfCancellationRequested`) і передається далі.
+- `CatalogService.ImportAsync(importer, path, ct)` – додає записи, піднімає подію для кожного;
+  запис з id, який уже є у сховищі, пропускається, тому повторний імпорт нічого не дублює.
+- У розв'язку немає `async void`, `.Result` і `.Wait()`.
+
+```powershell
+dotnet run --project src/Cli -- import-async                        # Імпортовано записів: 17
+dotnet run --project src/Cli -- import-async data/import-bad.json   # Дані відхилено: Запис 3: ...
+dotnet run --project src/Cli -- import-async --slow=5 --timeout=1   # Імпорт скасовано (спрацював таймаут).
+dotnet run --project src/Cli -- import-async --slow=20              # натиснути Ctrl+C під час очікування
+```
+
+`--slow=N` імітує великий файл (затримка N секунд перед читанням), щоб скасування можна було показати.
+Скасування – це не помилка: `OperationCanceledException` обробляється окремим `catch`, який стоїть першим.
+
+### Винятки
+
+| Виняток | Коли | Приклад |
+|---|---|---|
+| `ArgumentException`, `ArgumentOutOfRangeException` | некоректний аргумент | порожній SKU, прихід −5 |
+| `DomainException` | порушено бізнес-правило | видати більше залишку, немає запису з таким id, зіпсований запис у файлі імпорту |
+| `OperationCanceledException` | операцію скасовано (Ctrl+C або таймаут) | – |
+| `FileNotFoundException`, `IOException` | технічна помилка, передається як є | файлу немає |
+
+Коли імпортер обгортає `ArgumentException` або `JsonException` у `DomainException`, початковий виняток
+зберігається в `InnerException`.
+
+### Тести
+
+```powershell
+dotnet test
+```
+
+```text
+Passed!  - Failed:     0, Passed:    39, Skipped:     0, Total:    39
+```
+
+Проєкт `tests/Core.Tests` посилається лише на Core. Сховище в тестах – `InMemoryCatalogStore`;
+тести не читають `data/` з репозиторію, а кілька тестів із файлом пишуть у системний temp і видаляють файл.
+
+| Файл | Що перевіряє |
+|---|---|
+| `ProductTests` | інваріанти товару, нормалізація SKU, `ToDto` / `FromDto` |
+| `DomainRulesTests` | дубль SKU на складі, переміщення, переходи стану документа |
+| `CatalogServiceTests` | відмова не змінює стан, подія рівно один раз, події немає після відмови |
+| `ReportServiceTests` | дефіцит (`[Theory]`), детермінований топ-N, групування, порожнє джерело |
+| `ImportTests` | скасування, зіпсований запис, повторний імпорт, зв'язані токени, прогрес |
+| `CsvImportTests`, `StorageTests` | CSV-імпорт з помилками, файлове і кешуюче сховища, потоковий імпорт |
+
+### Додаткові завдання
+
+1. **Потоковий імпорт**: `JsonCatalogImporter.StreamAsync` повертає `IAsyncEnumerable<Product>`
+   (з `[EnumeratorCancellation]`), сервіс читає його через `await foreach`. Прапорець `--stream`.
+2. **Зв'язані токени**: `CancellationTokenSource.CreateLinkedTokenSource(userToken, timeoutToken)`;
+   тест `ImportAsync_WithLinkedTokens_IsCancelledByTimeout_NotByUser` доводить, що спрацював саме таймаут.
+3. **IProgress<int>**: `ImportAsync(..., progress)` повідомляє відсоток; у Cli прапорець `--progress`.
+4. **Покриття**: `dotnet test --collect:"XPlat Code Coverage"` – 63,1 % рядків Core. Не покриті
+   `EnvironmentInfo` (залежить від машини, де запускають), `SampleData` (демо-дані), `MixedCsvImporter`
+   і `ProductJsonImporter` (додаткові імпортери ЛР3), частина звітів з додаткових завдань ЛР7.
+   Це прийнятно: основні правила домену, сервіс, сховища й обов'язкові звіти покриті на 84–100 %.

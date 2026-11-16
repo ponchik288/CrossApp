@@ -37,7 +37,7 @@ public sealed class Warehouse
         ArgumentNullException.ThrowIfNull(product);
 
         if (FindBySku(product.Sku) is not null)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"На складі {Id} вже є товар з артикулом {product.Sku}");
 
         _products.Add(product);

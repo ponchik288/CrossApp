@@ -1,3 +1,4 @@
+using Core;
 using Core.Domain;
 using Core.Events;
 using Core.Services;
@@ -70,7 +71,7 @@ internal static class EventsCommand
             action();
             Console.WriteLine($"  {title}: помилки не було");
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is DomainException or InvalidOperationException or ArgumentException)
         {
             Console.WriteLine($"  {title}: {ex.Message.ReplaceLineEndings(" ")}");
         }

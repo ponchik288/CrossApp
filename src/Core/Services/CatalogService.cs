@@ -49,6 +49,54 @@ public sealed class CatalogService(ICatalogStore store, INotificationSink? sink 
         return true;
     }
 
+    // Асинхронний імпорт. Імпортер приходить параметром, токен скасування передається далі.
+    public async Task<int> ImportAsync(
+        ICatalogImporter importer, string path, CancellationToken ct = default, IProgress<int>? progress = null)
+    {
+        ArgumentNullException.ThrowIfNull(importer);
+
+        IReadOnlyList<Product> items = await importer.LoadAsync(path, ct);
+
+        int added = 0;
+        for (int i = 0; i < items.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (TryAddImported(items[i]))
+                added++;
+
+            progress?.Report((i + 1) * 100 / items.Count);
+        }
+
+        return added;
+    }
+
+    // Потоковий імпорт: записи надходять по одному через await foreach.
+    public async Task<int> ImportStreamAsync(IAsyncEnumerable<Product> items, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+
+        int added = 0;
+        await foreach (Product item in items.WithCancellation(ct))
+        {
+            if (TryAddImported(item))
+                added++;
+        }
+
+        return added;
+    }
+
+    // Запис з id, який уже є у сховищі, пропускаємо: повторний імпорт нічого не дублює.
+    private bool TryAddImported(Product item)
+    {
+        if (_store.GetById(item.Id) is not null)
+            return false;
+
+        _store.Add(item);
+        OnChanged(item, CatalogChangeKind.Added, item.Quantity);
+        return true;
+    }
+
     public IReadOnlyList<Product> All() => _store.List();
 
     public Product? Find(string id) => _store.GetById(id);
@@ -76,5 +124,5 @@ public sealed class CatalogService(ICatalogStore store, INotificationSink? sink 
     }
 
     private Product Require(string id) =>
-        _store.GetById(id) ?? throw new InvalidOperationException($"Немає запису з id={id}.");
+        _store.GetById(id) ?? throw new DomainException($"Немає запису з id={id}.");
 }

@@ -39,6 +39,9 @@ var service = new CatalogService(store, sink);
 // Команда — перший аргумент без "--". Без команди запускається сценарій каталогу.
 string command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "catalog";
 
+if (command == "import-async")
+    return await ImportAsyncCommand.RunAsync(service, args);
+
 return command switch
 {
     "catalog" => CatalogCommand.Run(service, store, dataPath),

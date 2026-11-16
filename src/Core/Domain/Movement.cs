@@ -45,7 +45,7 @@ public sealed class Movement
     private void ChangeStatus(MovementStatus next)
     {
         if (!CanChange(Status, next))
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Переміщення {Id}: перехід {Status} → {next} заборонений");
 
         Status = next;

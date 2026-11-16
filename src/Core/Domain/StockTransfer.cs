@@ -10,7 +10,7 @@ public static class StockTransfer
         ArgumentNullException.ThrowIfNull(to);
 
         if (from.Sku != to.Sku)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Не можна перемістити {from.Sku} у запис товару {to.Sku}: артикули різні");
 
         // Спочатку видача: вона перевіряє і кількість, і залишок. Якщо вона не пройде, прихід не відбудеться.

@@ -1,4 +1,5 @@
 using Core.Abstractions;
+using Core;
 using Core.Domain;
 using Core.Services;
 using Core.Storage;
@@ -63,7 +64,7 @@ internal static class CatalogCommand
             action();
             Console.WriteLine($"  {title}: помилки не було");
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is DomainException or InvalidOperationException or ArgumentException)
         {
             Console.WriteLine($"  {title}: {ex.Message.ReplaceLineEndings(" ")}");
         }
