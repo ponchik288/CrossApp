@@ -20,7 +20,7 @@ else
 {
     store = useFile
         ? new FileCatalogStore(dataPath)
-        : new InMemoryCatalogStore(SampleData.Products());
+        : new InMemoryCatalogStore(args.Contains("--empty") ? null : SampleData.Products());
 
     if (args.Contains("--cache"))
         store = new CachingCatalogStore(store);
@@ -43,6 +43,7 @@ return command switch
 {
     "catalog" => CatalogCommand.Run(service, store, dataPath),
     "events" => EventsCommand.Run(service, logPath),
+    _ when command.StartsWith("report") => ReportCommand.Run(command, service),
     "import" => ImportCommand.Run(args.Skip(1).ToArray()),
     "demo" => DomainDemo.Run(),
     "env" => EnvironmentPrinter.Print(args.Contains("--json")),

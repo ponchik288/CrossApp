@@ -60,6 +60,10 @@ public sealed class CatalogService(ICatalogStore store, INotificationSink? sink 
         return _store.List().Where(predicate).ToList();
     }
 
+    // Відкладений запит: без ToList(), тому виконується лише під час перебирання результату.
+    public IEnumerable<Product> Filter(IEnumerable<Product> source, Func<Product, bool> predicate) =>
+        source.Where(predicate);
+
     // Єдине місце, де піднімається подія. Викликається лише ПІСЛЯ успішної зміни.
     private void OnChanged(Product p, CatalogChangeKind kind, int delta) =>
         Changed?.Invoke(this, Notified(new CatalogChangedEventArgs(p.Id, kind, delta, p.Quantity)));

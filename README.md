@@ -30,12 +30,14 @@ CrossApp/
       Storage/               сховища: у пам'яті, файлове, кешуюче (ЛР5)
       Services/              CatalogService – бізнес-операції (ЛР5)
       Events/                дані події зміни каталогу (ЛР6)
+      Reports/               LINQ-звіти і їхні DTO (ЛР7)
       SampleData.cs          зразкові дані (18 товарів)
     Cli/                     консольний застосунок
       Cli.csproj             містить ProjectReference на Core
       Program.cs             composition root і вибір команди
       CatalogCommand.cs      сценарій роботи з каталогом
       EventsCommand.cs       підписка на події, лог у файл
+      ReportCommand.cs       підкоманди звітів
       Sinks.cs               одержувачі сповіщень (консоль, файл)
       StoreFactory.cs        вибір сховища через фабрику
       ImportCommand.cs       імпорт із файлу і вивід результату
@@ -63,6 +65,7 @@ dotnet build
 dotnet run --project src/Cli                             # каталог, сховище в пам'яті
 dotnet run --project src/Cli -- --file                   # каталог, файлове сховище
 dotnet run --project src/Cli -- events                   # події сервісу і лог logs/app.log
+dotnet run --project src/Cli -- report-top               # звіти: report-low, report-groups, report-sum
 dotnet run --project src/Cli -- data/sample.csv          # імпорт CSV
 dotnet run --project src/Cli -- data/sample.json         # імпорт JSON
 dotnet run --project src/Cli -- data/mixed.csv --mixed   # товари і склади в одному файлі
@@ -378,3 +381,71 @@ dotnet run --project src/Cli -- events
    зате залежність видно в конструкторі. Подія дозволяє будь-яку кількість підписників і відписку.
 2. **Action<string> в імпорті**: `ProductCsvImporter.Load(path, onSkipped)` викликає делегат одразу
    для кожного пропущеного рядка. Прапорець `--trace`: `dotnet run --project src/Cli -- data/sample.csv --trace`.
+
+## ЛР7. Звіти через LINQ
+
+Усі запити лежать у `Core/Reports/ReportService.cs`. Методи приймають `IEnumerable<Product>`
+(а не сховище) і повертають `IReadOnlyList` з DTO, а не сутності. У `Program.cs` і в Cli-командах
+немає жодного `Where` чи `GroupBy` – лише виклик звіту і вивід. Використано тільки LINQ to Objects.
+
+| Команда | Метод | Питання, на яке відповідає | Оператори |
+|---|---|---|---|
+| `report-top` | `TopByQuantity(source, 5)` | яких товарів найбільше | OrderByDescending, ThenBy, Take, Select |
+| `report-low` | `LowStock(source, 10)` | які товари закінчуються | Where, OrderBy, ThenBy, Select |
+| `report-groups` | `ByUnit(source)` | як залишки розподілені за одиницями виміру | GroupBy, Select, Count, Sum, OrderByDescending |
+| `report-sum` | `Totals(source)` | скільки позицій, сума, середнє, максимум | Sum, Average, Max |
+| `report-deferred` | – | демонстрація відкладеного виконання | Where, Count, ToList |
+
+DTO звітів: `StockLine`, `GroupSummary`, `MovementSummary` (records у `Core/Reports`).
+У топ-N другий ключ сортування – SKU, тому порядок однаковий за кожного запуску.
+Порожнє джерело не спричиняє винятку (перевірка: `--empty`).
+
+```powershell
+dotnet run --project src/Cli -- report-groups
+dotnet run --project src/Cli -- report-sum
+dotnet run --project src/Cli -- report-low --empty
+```
+
+```text
+  шт     позицій:   4   сумарно:   4431
+  м      позицій:   2   сумарно:   1600
+  кг     позицій:   3   сумарно:    790
+  м2     позицій:   3   сумарно:    716
+  уп     позицій:   2   сумарно:    149
+  л      позицій:   2   сумарно:     72
+  т      позицій:   2   сумарно:     25
+
+  позицій 18, всього 7783, середнє 432,39, макс 4200
+```
+
+### Відкладене виконання
+
+`Where`, `Select`, `OrderBy`, `GroupBy` лише описують запит. Виконується він тоді, коли результат
+перебирають: у `foreach` або завершальним оператором (`ToList`, `Count()`, `Sum`). У звітах
+`ReportService` кожен метод закінчується `ToList()`, тому запит виконується один раз усередині
+методу, і Cli отримує готовий список. У демо `report-deferred` запит `query` збережено без `ToList()`:
+перший `query.Count()` дав 3, потім у джерело додали товар із залишком 3, і другий `query.Count()`
+перерахував запит по зміненому джерелу й дав 4. Після `query.ToList()` результат зафіксовано:
+джерело очистили, а у знімку лишилося 4.
+
+```text
+Дефіцитних до змін: 3
+Дефіцитних після змін: 4
+У знімку лишилось: 4
+Запит по очищеному джерелу: 0
+```
+
+### Додаткові завдання
+
+1. **GroupJoin двох колекцій** (`report-moves`): товари × переміщення зі зведенням у `MovementSummary`;
+   товари без переміщень теж потрапляють у результат.
+2. **Власний метод розширення** `TopBy<T>(this IEnumerable<T>, Func<T, int>, int)` – використано у
+   двох звітах: `TopGroups` (`report-top-groups`) і `MostMoved` (`report-most-moved`).
+3. **Синтаксис запитів** (`report-groups-query`): `ByUnitQuerySyntax` записано як
+   `from ... group ... by ... into g orderby ... select ...`. Результат той самий. Для групування
+   такий запис читається як речення; у методному синтаксисі зручніше дописувати `Where`, `ThenBy`, `Take`
+   ланцюжком, тому основні звіти написані методами.
+4. **Stopwatch на 100 000 записів** (`report-bench`, конфігурація Debug, середнє за 20 прогонів):
+   без проміжних `ToList` – близько 32 мс, з `ToList` після кожного кроку – близько 28 мс.
+   Різниця мала: зайві списки не прискорюють запит суттєво, зате кожен `ToList` створює ще одну
+   копію даних у пам'яті.

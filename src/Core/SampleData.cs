@@ -26,4 +26,17 @@ public static class SampleData
         Product.Create("P-017", "SKU-017", "Утеплювач мінвата 50мм", "м2", 310),
         Product.Create("P-018", "SKU-018", "Гіпс будівельний", "кг", 0)
     ];
+
+    // Зразкові переміщення для звіту «товари × переміщення».
+    public static IReadOnlyList<Movement> Movements() =>
+    [
+        Movement.Create("M-001", "SKU-001", 40),
+        Movement.Create("M-002", "SKU-001", 25),
+        Movement.Create("M-003", "SKU-003", 600),
+        Movement.Create("M-004", "SKU-006", 120),
+        Movement.Create("M-005", "SKU-006", 80),
+        Movement.Create("M-006", "SKU-006", 50),
+        Movement.Create("M-007", "SKU-010", 100),
+        Movement.Create("M-008", "SKU-012", 300)
+    ];
 }
