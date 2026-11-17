@@ -8,7 +8,9 @@ COPY src/Web/*.csproj src/Web/
 RUN dotnet restore src/Web/Web.csproj
 
 COPY . .
-RUN dotnet publish src/Web/Web.csproj -c Release -o /app/publish --no-restore
+# Без --no-restore: пакет зі скриптом Blazor (_framework/blazor.web.js) SDK додає лише тоді,
+# коли бачить .razor-файли, а під час restore вище їх ще не було. Решта пакетів береться з кешу шару.
+RUN dotnet publish src/Web/Web.csproj -c Release -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
